@@ -1,0 +1,6 @@
+lib: [
+  "librustzcash/include/librustzcash.h"
+  "target/release/librustzcash.a"
+  "rustc-bls12-381/include/rustc_bls12_381.h"
+  "target/release/librustc_bls12_381.a"
+]

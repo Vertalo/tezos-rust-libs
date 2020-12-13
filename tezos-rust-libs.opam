@@ -1,0 +1,14 @@
+opam-version: "2.0"
+maintainer: "contact@tezos.com"
+authors: [ "Tezos devteam" ]
+homepage: "https://www.tezos.com/"
+bug-reports: "https://gitlab.com/tezos/tezos-rust-libs/issues"
+dev-repo: "git+https://gitlab.com/tezos/tezos-rust-libs.git"
+license: "multiple"
+depends: [
+  "conf-rust"
+]
+build:[
+  ["cargo" "build" "--target-dir" "target" "--release"]
+]
+synopsis: "Tezos: all vendored rust dependencies of libsapling"
