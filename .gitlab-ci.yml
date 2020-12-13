@@ -1,0 +1,8 @@
+install-and-remove:
+  image: ocaml/opam
+  script:
+    - opam pin --no-action tezos-rust-libs .
+    - opam depext tezos-rust-libs
+    - opam install --deps-only tezos-rust-libs
+    - opam install -v tezos-rust-libs
+    - opam remove -a -y tezos-rust-libs
