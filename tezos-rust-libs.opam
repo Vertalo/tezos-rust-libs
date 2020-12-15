@@ -11,4 +11,4 @@ depends: [
 build:[
   ["cargo" "build" "--target-dir" "target" "--release"]
 ]
-synopsis: "Tezos: all vendored rust dependencies of libsapling"
+synopsis: "Tezos: all rust dependencies and their dependencies"

@@ -6,3 +6,4 @@ This repository contains all the rust libraries used in the codebase of tezos/te
  - Complete or adapt the list in `Cargo.toml`
  - Refresh `Cargo.lock` with `cargo update`
  - Run `cargo vendor` to regenerate `vendor/`
+ - Commit everything
