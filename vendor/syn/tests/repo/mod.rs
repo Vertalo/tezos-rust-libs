@@ -8,25 +8,30 @@ use std::path::Path;
 use tar::Archive;
 use walkdir::DirEntry;
 
-const REVISION: &str = "46e85b4328fe18492894093c1092dfe509df4370";
+const REVISION: &str = "72da5a9d85a522b11e80d0fdd1fd95247d442604";
 
 #[rustfmt::skip]
 static EXCLUDE: &[&str] = &[
-    // Deprecated anonymous parameter syntax in traits
-    "test/ui/issues/issue-13105.rs",
-    "test/ui/issues/issue-13775.rs",
-    "test/ui/issues/issue-34074.rs",
-    "test/ui/proc-macro/trait-fn-args-2015.rs",
+    // Compile-fail expr parameter in const generic position: f::<1 + 2>()
+    "src/test/ui/const-generics/closing-args-token.rs",
+    "src/test/ui/const-generics/const-expression-parameter.rs",
 
-    // not actually test cases
-    "test/rustdoc-ui/test-compile-fail2.rs",
-    "test/rustdoc-ui/test-compile-fail3.rs",
-    "test/ui/include-single-expr-helper.rs",
-    "test/ui/include-single-expr-helper-1.rs",
-    "test/ui/issues/auxiliary/issue-21146-inc.rs",
-    "test/ui/json-bom-plus-crlf-multifile-aux.rs",
-    "test/ui/macros/auxiliary/macro-comma-support.rs",
-    "test/ui/macros/auxiliary/macro-include-items-expr.rs",
+    // Deprecated anonymous parameter syntax in traits
+    "src/test/ui/issues/issue-13105.rs",
+    "src/test/ui/issues/issue-13775.rs",
+    "src/test/ui/issues/issue-34074.rs",
+    "src/test/ui/proc-macro/trait-fn-args-2015.rs",
+
+    // Not actually test cases
+    "src/test/rustdoc-ui/test-compile-fail2.rs",
+    "src/test/rustdoc-ui/test-compile-fail3.rs",
+    "src/test/ui/include-single-expr-helper.rs",
+    "src/test/ui/include-single-expr-helper-1.rs",
+    "src/test/ui/issues/auxiliary/issue-21146-inc.rs",
+    "src/test/ui/json-bom-plus-crlf-multifile-aux.rs",
+    "src/test/ui/lint/expansion-time-include.rs",
+    "src/test/ui/macros/auxiliary/macro-comma-support.rs",
+    "src/test/ui/macros/auxiliary/macro-include-items-expr.rs",
 ];
 
 pub fn base_dir_filter(entry: &DirEntry) -> bool {
@@ -42,18 +47,17 @@ pub fn base_dir_filter(entry: &DirEntry) -> bool {
     if cfg!(windows) {
         path_string = path_string.replace('\\', "/").into();
     }
-    assert!(path_string.starts_with("tests/rust/src/"));
-    let path = &path_string["tests/rust/src/".len()..];
+    let path = if let Some(path) = path_string.strip_prefix("tests/rust/") {
+        path
+    } else {
+        panic!("unexpected path in Rust dist: {}", path_string);
+    };
 
-    // TODO assert that parsing fails on the parse-fail cases
-    if path.starts_with("test/parse-fail")
-        || path.starts_with("test/compile-fail")
-        || path.starts_with("test/rustfix")
-    {
+    if path.starts_with("src/test/compile-fail") || path.starts_with("src/test/rustfix") {
         return false;
     }
 
-    if path.starts_with("test/ui") {
+    if path.starts_with("src/test/ui") {
         let stderr_path = entry.path().with_extension("stderr");
         if stderr_path.exists() {
             // Expected to fail in some way
@@ -82,10 +86,10 @@ pub fn clone_rust() {
         download_and_unpack().unwrap();
     }
     let mut missing = String::new();
-    let test_src = Path::new("tests/rust/src");
+    let test_src = Path::new("tests/rust");
     for exclude in EXCLUDE {
         if !test_src.join(exclude).exists() {
-            missing += "\ntests/rust/src/";
+            missing += "\ntests/rust/";
             missing += exclude;
         }
     }
