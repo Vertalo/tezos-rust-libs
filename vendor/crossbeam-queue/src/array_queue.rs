@@ -12,12 +12,15 @@ use alloc::vec::Vec;
 use core::cell::UnsafeCell;
 use core::fmt;
 use core::marker::PhantomData;
-use core::mem::{self, MaybeUninit};
+use core::mem;
+use core::ptr;
 use core::sync::atomic::{self, AtomicUsize, Ordering};
 
 use crossbeam_utils::{Backoff, CachePadded};
 
-use crate::err::{PopError, PushError};
+use maybe_uninit::MaybeUninit;
+
+use err::{PopError, PushError};
 
 /// A slot in a queue.
 struct Slot<T> {
@@ -107,22 +110,22 @@ impl<T> ArrayQueue<T> {
         let head = 0;
         let tail = 0;
 
-        // Allocate a buffer of `cap` slots initialized
-        // with stamps.
+        // Allocate a buffer of `cap` slots.
         let buffer = {
-            let mut v: Vec<Slot<T>> = (0..cap)
-                .map(|i| {
-                    // Set the stamp to `{ lap: 0, index: i }`.
-                    Slot {
-                        stamp: AtomicUsize::new(i),
-                        value: UnsafeCell::new(MaybeUninit::uninit()),
-                    }
-                })
-                .collect();
+            let mut v = Vec::<Slot<T>>::with_capacity(cap);
             let ptr = v.as_mut_ptr();
             mem::forget(v);
             ptr
         };
+
+        // Initialize stamps in the slots.
+        for i in 0..cap {
+            unsafe {
+                // Set the stamp to `{ lap: 0, index: i }`.
+                let slot = buffer.add(i);
+                ptr::write(&mut (*slot).stamp, AtomicUsize::new(i));
+            }
+        }
 
         // One lap is the smallest power of two greater than `cap`.
         let one_lap = (cap + 1).next_power_of_two();
@@ -299,7 +302,7 @@ impl<T> ArrayQueue<T> {
     /// # Examples
     ///
     /// ```
-    /// use crossbeam_queue::ArrayQueue;
+    /// use crossbeam_queue::{ArrayQueue, PopError};
     ///
     /// let q = ArrayQueue::<i32>::new(100);
     ///
@@ -314,7 +317,7 @@ impl<T> ArrayQueue<T> {
     /// # Examples
     ///
     /// ```
-    /// use crossbeam_queue::ArrayQueue;
+    /// use crossbeam_queue::{ArrayQueue, PopError};
     ///
     /// let q = ArrayQueue::new(100);
     ///
@@ -339,7 +342,7 @@ impl<T> ArrayQueue<T> {
     /// # Examples
     ///
     /// ```
-    /// use crossbeam_queue::ArrayQueue;
+    /// use crossbeam_queue::{ArrayQueue, PopError};
     ///
     /// let q = ArrayQueue::new(1);
     ///
@@ -363,7 +366,7 @@ impl<T> ArrayQueue<T> {
     /// # Examples
     ///
     /// ```
-    /// use crossbeam_queue::ArrayQueue;
+    /// use crossbeam_queue::{ArrayQueue, PopError};
     ///
     /// let q = ArrayQueue::new(100);
     /// assert_eq!(q.len(), 0);
@@ -431,7 +434,7 @@ impl<T> Drop for ArrayQueue<T> {
 }
 
 impl<T> fmt::Debug for ArrayQueue<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.pad("ArrayQueue { .. }")
     }
 }

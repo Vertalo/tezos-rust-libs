@@ -2,13 +2,14 @@ use alloc::boxed::Box;
 use core::cell::UnsafeCell;
 use core::fmt;
 use core::marker::PhantomData;
-use core::mem::MaybeUninit;
 use core::ptr;
 use core::sync::atomic::{self, AtomicPtr, AtomicUsize, Ordering};
 
 use crossbeam_utils::{Backoff, CachePadded};
 
-use crate::err::PopError;
+use maybe_uninit::MaybeUninit;
+
+use err::PopError;
 
 // Bits indicating the state of a slot:
 // * If a value has been written into the slot, `WRITE` is set.
@@ -390,7 +391,7 @@ impl<T> SegQueue<T> {
     /// # Examples
     ///
     /// ```
-    /// use crossbeam_queue::SegQueue;
+    /// use crossbeam_queue::{SegQueue, PopError};
     ///
     /// let q = SegQueue::new();
     /// assert_eq!(q.len(), 0);
@@ -413,14 +414,6 @@ impl<T> SegQueue<T> {
                 tail &= !((1 << SHIFT) - 1);
                 head &= !((1 << SHIFT) - 1);
 
-                // Fix up indices if they fall onto block ends.
-                if (tail >> SHIFT) & (LAP - 1) == LAP - 1 {
-                    tail = tail.wrapping_add(1 << SHIFT);
-                }
-                if (head >> SHIFT) & (LAP - 1) == LAP - 1 {
-                    head = head.wrapping_add(1 << SHIFT);
-                }
-
                 // Rotate indices so that head falls into the first block.
                 let lap = (head >> SHIFT) / LAP;
                 tail = tail.wrapping_sub((lap * LAP) << SHIFT);
@@ -429,6 +422,15 @@ impl<T> SegQueue<T> {
                 // Remove the lower bits.
                 tail >>= SHIFT;
                 head >>= SHIFT;
+
+                // Fix up indices if they fall onto block ends.
+                if head == BLOCK_CAP {
+                    head = 0;
+                    tail -= LAP;
+                }
+                if tail == BLOCK_CAP {
+                    tail += 1;
+                }
 
                 // Return the difference minus the number of blocks between tail and head.
                 return tail - head - tail / LAP;
@@ -476,7 +478,7 @@ impl<T> Drop for SegQueue<T> {
 }
 
 impl<T> fmt::Debug for SegQueue<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.pad("SegQueue { .. }")
     }
 }

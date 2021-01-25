@@ -52,7 +52,9 @@ fn main() {
 }
 ```
 
-## Usage in constants ##
+## Feature flags ##
+
+### Usage in constants ###
 `memoffset` has **experimental** support for compile-time `offset_of!` on a nightly compiler.
 
 In order to use it, you must enable the `unstable_const` crate feature and several compiler features.
@@ -66,16 +68,12 @@ features = ["unstable_const"]
 
 Your crate root: (`lib.rs`/`main.rs`)
 ```rust,ignore
-#![feature(ptr_offset_from, const_ptr_offset_from, const_transmute, const_raw_ptr_deref)]
+#![feature(ptr_offset_from, const_ptr_offset_from, const_maybe_uninit_as_ptr, const_raw_ptr_deref)]
 ```
 
-and then:
+If you intend to use `offset_of!` inside a `const fn`, also add the `const_fn` compiler feature.
 
-```rust,ignore
-struct Foo {
-    a: u32,
-    b: u32,
-}
-
-let foo = [0; offset_of!(Foo, b)] 
-```
+### Raw references ###
+Recent nightlies support [a way to create raw pointers](https://github.com/rust-lang/rust/issues/73394) that avoids creating intermediate safe references.
+`memoffset` can make use of that feature to avoid what is technically Undefined Behavior.
+Use the `unstable_raw` feature to enable this.
