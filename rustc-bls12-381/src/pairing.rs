@@ -7,9 +7,18 @@ use pairing::bls12_381;
 use pairing::Engine;
 use pairing::PairingCurveAffine;
 
+#[cfg(not(feature = "wasm"))]
 use libc::c_uchar;
 
-#[no_mangle]
+#[cfg(feature = "wasm")]
+#[allow(non_camel_case_types)]
+#[cfg(feature = "wasm")]
+type c_uchar = u8;
+#[cfg(feature = "wasm")]
+use wasm_bindgen::prelude::*;
+
+#[cfg_attr(not(feature = "wasm"), no_mangle)]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub extern "C" fn rustc_bls12_381_pairing_miller_loop_simple(
     buffer: *mut [c_uchar; LENGTH_FQ12_BYTES],
     g1: *const [c_uchar; LENGTH_UNCOMPRESSED_G1_BYTES],
@@ -29,7 +38,8 @@ pub extern "C" fn rustc_bls12_381_pairing_miller_loop_simple(
     write_fq12(buffer, result_miller_loop)
 }
 
-#[no_mangle]
+#[cfg_attr(not(feature = "wasm"), no_mangle)]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub extern "C" fn rustc_bls12_381_pairing_miller_loop_2(
     buffer: *mut [c_uchar; LENGTH_FQ12_BYTES],
     g1_1: *const [c_uchar; LENGTH_UNCOMPRESSED_G1_BYTES],
@@ -61,7 +71,8 @@ pub extern "C" fn rustc_bls12_381_pairing_miller_loop_2(
     write_fq12(buffer, result_miller_loop)
 }
 
-#[no_mangle]
+#[cfg_attr(not(feature = "wasm"), no_mangle)]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub extern "C" fn rustc_bls12_381_pairing_miller_loop_3(
     buffer: *mut [c_uchar; LENGTH_FQ12_BYTES],
     g1_1: *const [c_uchar; LENGTH_UNCOMPRESSED_G1_BYTES],
@@ -106,7 +117,8 @@ pub extern "C" fn rustc_bls12_381_pairing_miller_loop_3(
     write_fq12(buffer, result_miller_loop)
 }
 
-#[no_mangle]
+#[cfg_attr(not(feature = "wasm"), no_mangle)]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub extern "C" fn rustc_bls12_381_pairing_miller_loop_4(
     buffer: *mut [c_uchar; LENGTH_FQ12_BYTES],
     g1_1: *const [c_uchar; LENGTH_UNCOMPRESSED_G1_BYTES],
@@ -170,7 +182,8 @@ pub extern "C" fn rustc_bls12_381_pairing_miller_loop_4(
     write_fq12(buffer, result_miller_loop)
 }
 
-#[no_mangle]
+#[cfg_attr(not(feature = "wasm"), no_mangle)]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub extern "C" fn rustc_bls12_381_pairing_miller_loop_5(
     buffer: *mut [c_uchar; LENGTH_FQ12_BYTES],
     g1_1: *const [c_uchar; LENGTH_UNCOMPRESSED_G1_BYTES],
@@ -247,7 +260,8 @@ pub extern "C" fn rustc_bls12_381_pairing_miller_loop_5(
     write_fq12(buffer, result_miller_loop)
 }
 
-#[no_mangle]
+#[cfg_attr(not(feature = "wasm"), no_mangle)]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub extern "C" fn rustc_bls12_381_pairing_miller_loop_6(
     buffer: *mut [c_uchar; LENGTH_FQ12_BYTES],
     g1_1: *const [c_uchar; LENGTH_UNCOMPRESSED_G1_BYTES],
@@ -337,7 +351,8 @@ pub extern "C" fn rustc_bls12_381_pairing_miller_loop_6(
     write_fq12(buffer, result_miller_loop)
 }
 
-#[no_mangle]
+#[cfg_attr(not(feature = "wasm"), no_mangle)]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub extern "C" fn rustc_bls12_381_pairing(
     buffer: *mut [c_uchar; LENGTH_FQ12_BYTES],
     g1: *const [c_uchar; LENGTH_UNCOMPRESSED_G1_BYTES],
@@ -352,12 +367,13 @@ pub extern "C" fn rustc_bls12_381_pairing(
 }
 
 // Do not check if x is null, hence unsafe
-#[no_mangle]
+#[cfg_attr(not(feature = "wasm"), no_mangle)]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub extern "C" fn rustc_bls12_381_unsafe_pairing_final_exponentiation(
     buffer: *mut [c_uchar; LENGTH_FQ12_BYTES],
     x: *const [c_uchar; LENGTH_FQ12_BYTES],
 ) {
-    let x = read_fq12({ unsafe { &*x } }).unwrap();
+    let x = read_fq12(unsafe { &*x }).unwrap();
     let x = bls12_381::Bls12::final_exponentiation(&x).unwrap();
     write_fq12(buffer, x);
 }

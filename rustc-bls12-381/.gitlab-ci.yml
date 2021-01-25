@@ -1,0 +1,183 @@
+.run-test: &run-test
+  stage: test
+  before_script:
+    - rustc --version
+    - cargo --version
+    # wasm-pack
+    - curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+    - rustup target install wasm32-unknown-unknown
+  script:
+    # Normal compilation
+    - cargo build
+    # Run the test
+    - cargo test --verbose
+    # Build with wasm-bindgen
+    - wasm-pack build --target nodejs -- --features=wasm
+    - wasm-pack build --target no-modules -- --features=wasm
+    - wasm-pack build --target web -- --features=wasm
+    - wasm-pack build --target bundler -- --features=wasm
+
+.run-lint: &run-lint
+  stage: lint
+  before_script:
+    - rustc --version
+    - cargo --version
+    - rustup component add rustfmt
+  script:
+    - rustfmt --check src/*.rs
+
+stages:
+  - lint
+  - check-c-header
+  - test
+  - publish
+
+lint:
+  image: 'rust:1.40.0'
+  <<: *run-lint
+
+check-header-syntax-gcc-10.1.0:
+  image: 'gcc:10.1.0'
+  stage: check-c-header
+  before_script:
+    - gcc --version
+  script:
+    - gcc -fsyntax-only -Wall -Wextra -Wno-deprecated include/*.h
+
+check-header-syntax-gcc-9.3.0:
+  image: 'gcc:9.3.0'
+  stage: check-c-header
+  before_script:
+    - gcc --version
+  script:
+    - gcc -fsyntax-only -Wall -Wextra -Wno-deprecated include/*.h
+
+check-header-syntax-gcc-9:
+  image: 'gcc:9'
+  stage: check-c-header
+  before_script:
+    - gcc --version
+  script:
+    - gcc -fsyntax-only -Wall -Wextra -Wno-deprecated include/*.h
+
+check-header-syntax-gcc-8.4.0:
+  image: 'gcc:8.4.0'
+  stage: check-c-header
+  before_script:
+    - gcc --version
+  script:
+    - gcc -fsyntax-only -Wall -Wextra -Wno-deprecated include/*.h
+
+# Not working anymore because of wasm-bindgen
+# test-1.34.0:
+#   image: 'rust:1.34.0'
+#   <<: *run-test
+
+# test-1.36.0:
+#   image: 'rust:1.36.0'
+#   <<: *run-test
+
+test-1.39.0:
+  image: 'rust:1.39.0'
+  <<: *run-test
+
+test-1.40.0:
+  image: 'rust:1.40.0'
+  <<: *run-test
+
+test-1.41.0:
+  image: 'rust:1.41.0'
+  <<: *run-test
+
+test-1.42.0:
+  image: 'rust:1.42.0'
+  <<: *run-test
+
+test-1.43.0:
+  image: 'rust:1.43.0'
+  <<: *run-test
+
+test-1.44.0:
+  image: 'rust:1.44.0'
+  <<: *run-test
+
+test-1.45.0:
+  image: 'rust:1.45.0'
+  <<: *run-test
+
+test-1.46.0:
+  image: 'rust:1.46.0'
+  <<: *run-test
+
+npm-bundler-publish:
+  image: 'rust:1.46.0'
+  stage: publish
+  before_script:
+    - apt-get update -y
+    - apt-get install jq -y
+    - rustc --version
+    - cargo --version
+    # wasm-pack
+    - curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+    - rustup target install wasm32-unknown-unknown
+    # Install NVM to publish the package
+    - curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.35.3/install.sh | bash
+    - export NVM_DIR="$HOME/.nvm"
+    - . "$NVM_DIR/nvm.sh"
+    - nvm install 12.16.1
+    - nvm use 12.16.1
+  script:
+    # Build with wasm-bindgen for bundler
+    - wasm-pack build --out-dir npm-bundler --target bundler --scope dannywillems --release -- --features="wasm,wee_alloc"
+    - cd npm-bundler
+    - echo "//gitlab.com/api/v4/projects/${CI_PROJECT_ID}/packages/npm/:_authToken=${NPM_TOKEN}" > .npmrc
+    - echo "//gitlab.com/api/v4/packages/npm/:_authToken=${NPM_TOKEN}" >> .npmrc
+    - echo "@dannywillems:registry=https://gitlab.com/api/v4/packages/npm/" >> .npmrc
+    - echo -e "\nexport { wasm as __wasm };" >> rustc_bls12_381.js
+    - >
+        jq --arg id "https://gitlab.com/api/v4/projects/$CI_PROJECT_ID/packages/npm/" '. + {"publishConfig": {"@dannywillems:registry": $id}}' < package.json > package.json.new
+    - mv package.json.new package.json
+    - >
+      jq '.files += ["rustc_bls12_381_bg.js"]' < package.json > package.json.new
+    - mv package.json.new package.json
+    - cat package.json
+    - npm publish
+  only:
+    - tags
+
+npm-nodejs-publish:
+  image: 'rust:1.46.0'
+  stage: publish
+  before_script:
+    - apt-get update -y
+    - apt-get install jq -y
+    - rustc --version
+    - cargo --version
+    # wasm-pack
+    - curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+    - rustup target install wasm32-unknown-unknown
+    # Install NVM to publish the package
+    - curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.35.3/install.sh | bash
+    - export NVM_DIR="$HOME/.nvm"
+    - . "$NVM_DIR/nvm.sh"
+    - nvm install 12.16.1
+    - nvm use 12.16.1
+  script:
+    # Build with wasm-bindgen for bundler
+    - wasm-pack build --out-dir nodejs --target nodejs --scope dannywillems --release -- --features="wasm,wee_alloc"
+    - cd nodejs
+    - echo "//gitlab.com/api/v4/projects/${CI_PROJECT_ID}/packages/npm/:_authToken=${NPM_TOKEN}" > .npmrc
+    - echo "//gitlab.com/api/v4/packages/npm/:_authToken=${NPM_TOKEN}" >> .npmrc
+    - echo "@dannywillems:registry=https://gitlab.com/api/v4/packages/npm/" >> .npmrc
+    # Overwrite the module name
+    - >
+      jq '.name = "@dannywillems/rustc-bls12-381-node"' < package.json > package.json.new
+    - mv package.json.new package.json
+    # Overwrite registry to publish
+    - >
+        jq --arg id "https://gitlab.com/api/v4/projects/$CI_PROJECT_ID/packages/npm/" '. + {"publishConfig": {"@dannywillems:registry": $id}}' < package.json > package.json.new
+    - mv package.json.new package.json
+    - cat package.json
+    - npm publish
+  only:
+    - tags

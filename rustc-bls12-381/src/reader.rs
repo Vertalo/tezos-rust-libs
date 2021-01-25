@@ -1,8 +1,15 @@
 use ff::{PrimeField, PrimeFieldDecodingError, PrimeFieldRepr};
 use group::EncodedPoint;
-use libc::c_uchar;
 use pairing::bls12_381::{Fq, Fq12, Fq2, Fq6, Fr};
 use pairing::bls12_381::{G1Compressed, G1Uncompressed, G2Compressed, G2Uncompressed};
+
+#[cfg(not(feature = "wasm"))]
+use libc::c_uchar;
+
+#[cfg(feature = "wasm")]
+#[allow(non_camel_case_types)]
+#[cfg(feature = "wasm")]
+type c_uchar = u8;
 
 use super::{
     LENGTH_COMPRESSED_G1_BYTES, LENGTH_COMPRESSED_G2_BYTES, LENGTH_FQ12_BYTES, LENGTH_FQ_BYTES,
