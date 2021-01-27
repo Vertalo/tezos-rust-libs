@@ -16,7 +16,7 @@ edition = "2018"
 
 [lib]
 name = "rustzcash"
-path = "src/rust/src/rustzcash.rs"
+path = "src/rustzcash.rs"
 crate-type = ["staticlib"]
 
 [dependencies]
