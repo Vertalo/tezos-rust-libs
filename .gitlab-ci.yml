@@ -1,4 +1,40 @@
+stages:
+  - test
+  - install
+
+.build-wasm: &build-wasm
+  stage: test
+  before_script:
+    - rustc --version
+    - cargo --version
+    # wasm-pack
+    - curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+    - rustup target install wasm32-unknown-unknown
+  script:
+    # Debug mode
+    - cargo build
+    # Run the test
+    - cargo test --verbose
+    # Build with wasm-bindgen
+    ## librustzcash
+    - cd librustzcash
+    - wasm-pack build --target nodejs -- --features="wasm"
+    - wasm-pack build --target no-modules -- --features="wasm"
+    - wasm-pack build --target web -- --features="wasm"
+    - wasm-pack build --target bundler -- --features="wasm"
+    ## rustc-bls12-381 (already tested in https://gitlab.com/dannywillems/rustc-bls12-381)
+    - cd ../rustc-bls12-381
+    - wasm-pack build --target nodejs -- --features="wasm,wee_alloc"
+    - wasm-pack build --target no-modules -- --features="wasm,wee_alloc"
+    - wasm-pack build --target web -- --features="wasm,wee_alloc"
+    - wasm-pack build --target bundler -- --features="wasm,wee_alloc"
+
+build-wasm-1.44.0:
+  <<: *build-wasm
+  image: "rust:1.44.0"
+
 install-and-remove:
+  stage: install
   image: ocaml/opam
   script:
     - opam pin --no-action tezos-rust-libs .
