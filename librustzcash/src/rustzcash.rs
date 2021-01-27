@@ -23,7 +23,24 @@ use bellman::groth16::{Parameters, PreparedVerifyingKey, Proof};
 use blake2s_simd::Params as Blake2sParams;
 use bls12_381::Bls12;
 use group::{cofactor::CofactorGroup, GroupEncoding};
+
+#[cfg(feature = "wasm")]
+#[allow(non_camel_case_types)]
+#[cfg(feature = "wasm")]
+type c_uchar = u8;
+#[cfg(feature = "wasm")]
+#[allow(non_camel_case_types)]
+type size_t = usize;
+
+#[cfg(feature = "wasm")]
+use wasm_bindgen::prelude::*;
+
+// #[cfg(feature = "wasm")]
+// use std::sys_common::os_str_bytes::OsStringExt;
+
+#[cfg(not(feature = "wasm"))]
 use libc::{c_uchar, size_t};
+
 use rand_core::{OsRng, RngCore};
 use std::fs::File;
 use std::io::BufReader;
@@ -32,8 +49,10 @@ use std::slice;
 use subtle::CtOption;
 
 #[cfg(not(target_os = "windows"))]
+#[cfg(not(feature = "wasm"))]
 use std::ffi::OsStr;
 #[cfg(not(target_os = "windows"))]
+#[cfg(not(feature = "wasm"))]
 use std::os::unix::ffi::OsStrExt;
 
 #[cfg(target_os = "windows")]
@@ -97,6 +116,7 @@ fn fixed_scalar_mult(from: &[u8; 32], p_g: &jubjub::SubgroupPoint) -> jubjub::Su
 /// Loads the zk-SNARK parameters into memory and saves paths as necessary.
 /// Only called once.
 #[no_mangle]
+#[cfg(not(feature = "wasm"))]
 pub extern "C" fn librustzcash_init_zksnark_params(
     #[cfg(not(target_os = "windows"))] spend_path: *const u8,
     #[cfg(target_os = "windows")] spend_path: *const u16,
@@ -164,7 +184,8 @@ pub extern "C" fn librustzcash_init_zksnark_params(
 /// Writes the "uncommitted" note value for empty leaves of the Merkle tree.
 ///
 /// `result` must be a valid pointer to 32 bytes which will be written.
-#[no_mangle]
+#[cfg_attr(not(feature = "wasm"), no_mangle)]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub extern "C" fn librustzcash_tree_uncommitted(result: *mut [c_uchar; 32]) {
     let tmp = Note::uncommitted().to_bytes();
 
@@ -181,7 +202,8 @@ pub extern "C" fn librustzcash_tree_uncommitted(result: *mut [c_uchar; 32]) {
 ///
 /// The result of the merkle tree hash is placed in `result`, which must also be
 /// of length 32.
-#[no_mangle]
+#[cfg_attr(not(feature = "wasm"), no_mangle)]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub extern "C" fn librustzcash_merkle_hash(
     depth: size_t,
     a: *const [c_uchar; 32],
@@ -198,7 +220,8 @@ pub extern "C" fn librustzcash_merkle_hash(
     *result = tmp;
 }
 
-#[no_mangle] // ToScalar
+#[cfg_attr(not(feature = "wasm"), no_mangle)]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub extern "C" fn librustzcash_to_scalar(input: *const [c_uchar; 64], result: *mut [c_uchar; 32]) {
     // Should be okay, because caller is responsible for ensuring
     // the pointer is a valid pointer to 32 bytes, and that is the
@@ -210,7 +233,8 @@ pub extern "C" fn librustzcash_to_scalar(input: *const [c_uchar; 64], result: *m
     *result = scalar.to_bytes();
 }
 
-#[no_mangle]
+#[cfg_attr(not(feature = "wasm"), no_mangle)]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub extern "C" fn librustzcash_ask_to_ak(ask: *const [c_uchar; 32], result: *mut [c_uchar; 32]) {
     let ask = unsafe { &*ask };
     let ak = fixed_scalar_mult(ask, &SPENDING_KEY_GENERATOR);
@@ -220,7 +244,8 @@ pub extern "C" fn librustzcash_ask_to_ak(ask: *const [c_uchar; 32], result: *mut
     *result = ak.to_bytes();
 }
 
-#[no_mangle]
+#[cfg_attr(not(feature = "wasm"), no_mangle)]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub extern "C" fn librustzcash_nsk_to_nk(nsk: *const [c_uchar; 32], result: *mut [c_uchar; 32]) {
     let nsk = unsafe { &*nsk };
     let nk = fixed_scalar_mult(nsk, &PROOF_GENERATION_KEY_GENERATOR);
@@ -230,7 +255,8 @@ pub extern "C" fn librustzcash_nsk_to_nk(nsk: *const [c_uchar; 32], result: *mut
     *result = nk.to_bytes();
 }
 
-#[no_mangle]
+#[cfg_attr(not(feature = "wasm"), no_mangle)]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub extern "C" fn librustzcash_crh_ivk(
     ak: *const [c_uchar; 32],
     nk: *const [c_uchar; 32],
@@ -255,13 +281,15 @@ pub extern "C" fn librustzcash_crh_ivk(
     result.copy_from_slice(&h);
 }
 
-#[no_mangle]
+#[cfg_attr(not(feature = "wasm"), no_mangle)]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub extern "C" fn librustzcash_check_diversifier(diversifier: *const [c_uchar; 11]) -> bool {
     let diversifier = Diversifier(unsafe { *diversifier });
     diversifier.g_d().is_some()
 }
 
-#[no_mangle]
+#[cfg_attr(not(feature = "wasm"), no_mangle)]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub extern "C" fn librustzcash_ivk_to_pkd(
     ivk: *const [c_uchar; 32],
     diversifier: *const [c_uchar; 11],
@@ -299,7 +327,8 @@ fn test_gen_r() {
 }
 
 /// Generate uniformly random scalar in Jubjub. The result is of length 32.
-#[no_mangle]
+#[cfg_attr(not(feature = "wasm"), no_mangle)]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub extern "C" fn librustzcash_sapling_generate_r(result: *mut [c_uchar; 32]) {
     // create random 64 byte buffer
     let mut rng = OsRng;
@@ -347,7 +376,8 @@ fn priv_get_note(
 /// The `pk_d`, `r`, `ak` and `nk` parameters must be of length 32.
 /// The result is also of length 32 and placed in `result`.
 /// Returns false if `diversifier` or `pk_d` is not valid.
-#[no_mangle]
+#[cfg_attr(not(feature = "wasm"), no_mangle)]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub extern "C" fn librustzcash_sapling_compute_nf(
     diversifier: *const [c_uchar; 11],
     pk_d: *const [c_uchar; 32],
@@ -397,7 +427,8 @@ pub extern "C" fn librustzcash_sapling_compute_nf(
 /// The `pk_d` and `r` parameters must be of length 32.
 /// The result is also of length 32 and placed in `result`.
 /// Returns false if `diversifier` or `pk_d` is not valid.
-#[no_mangle]
+#[cfg_attr(not(feature = "wasm"), no_mangle)]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub extern "C" fn librustzcash_sapling_compute_cmu(
     diversifier: *const [c_uchar; 11],
     pk_d: *const [c_uchar; 32],
@@ -420,7 +451,8 @@ pub extern "C" fn librustzcash_sapling_compute_cmu(
 ///
 /// If P or sk are invalid, returns false. Otherwise, the result is written to
 /// the 32-byte `result` buffer.
-#[no_mangle]
+#[cfg_attr(not(feature = "wasm"), no_mangle)]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub extern "C" fn librustzcash_sapling_ka_agree(
     p: *const [c_uchar; 32],
     sk: *const [c_uchar; 32],
@@ -451,7 +483,8 @@ pub extern "C" fn librustzcash_sapling_ka_agree(
 /// Compute g_d = GH(diversifier) and returns false if the diversifier is
 /// invalid. Computes \[esk\] g_d and writes the result to the 32-byte `result`
 /// buffer. Returns false if `esk` is not a valid scalar.
-#[no_mangle]
+#[cfg_attr(not(feature = "wasm"), no_mangle)]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub extern "C" fn librustzcash_sapling_ka_derivepublic(
     diversifier: *const [c_uchar; 11],
     esk: *const [c_uchar; 32],
@@ -502,7 +535,8 @@ pub extern "C" fn librustzcash_eh_isvalid(
 }
 
 /// Creates a Sapling verification context. Please free this when you're done.
-#[no_mangle]
+#[cfg_attr(not(feature = "wasm"), no_mangle)]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub extern "C" fn librustzcash_sapling_verification_ctx_init() -> *mut SaplingVerificationContext {
     let ctx = Box::new(SaplingVerificationContext::new());
 
@@ -511,7 +545,8 @@ pub extern "C" fn librustzcash_sapling_verification_ctx_init() -> *mut SaplingVe
 
 /// Frees a Sapling verification context returned from
 /// [`librustzcash_sapling_verification_ctx_init`].
-#[no_mangle]
+#[cfg_attr(not(feature = "wasm"), no_mangle)]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub extern "C" fn librustzcash_sapling_verification_ctx_free(ctx: *mut SaplingVerificationContext) {
     drop(unsafe { Box::from_raw(ctx) });
 }
@@ -522,7 +557,8 @@ const GROTH_PROOF_SIZE: usize = 48 // π_A
 
 /// Check the validity of a Sapling Spend description, accumulating the value
 /// commitment into the context.
-#[no_mangle]
+#[cfg_attr(not(feature = "wasm"), no_mangle)]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub extern "C" fn librustzcash_sapling_check_spend(
     ctx: *mut SaplingVerificationContext,
     cv: *const [c_uchar; 32],
@@ -578,7 +614,8 @@ pub extern "C" fn librustzcash_sapling_check_spend(
 
 /// Check the validity of a Sapling Output description, accumulating the value
 /// commitment into the context.
-#[no_mangle]
+#[cfg_attr(not(feature = "wasm"), no_mangle)]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub extern "C" fn librustzcash_sapling_check_output(
     ctx: *mut SaplingVerificationContext,
     cv: *const [c_uchar; 32],
@@ -622,7 +659,8 @@ pub extern "C" fn librustzcash_sapling_check_output(
 
 /// Finally checks the validity of the entire Sapling transaction given
 /// valueBalance and the binding signature.
-#[no_mangle]
+#[cfg_attr(not(feature = "wasm"), no_mangle)]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub extern "C" fn librustzcash_sapling_final_check(
     ctx: *mut SaplingVerificationContext,
     value_balance: i64,
@@ -758,7 +796,8 @@ pub extern "C" fn librustzcash_sprout_verify(
 
 /// This function (using the proving context) constructs an Output proof given
 /// the necessary witness information. It outputs `cv` and the `zkproof`.
-#[no_mangle]
+#[cfg_attr(not(feature = "wasm"), no_mangle)]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub extern "C" fn librustzcash_sapling_output_proof(
     ctx: *mut SaplingProvingContext,
     esk: *const [c_uchar; 32],
@@ -811,7 +850,8 @@ pub extern "C" fn librustzcash_sapling_output_proof(
 /// buffer of 64-bytes for the signature.
 ///
 /// This function will fail if the provided `ask` or `ar` are invalid.
-#[no_mangle]
+#[cfg_attr(not(feature = "wasm"), no_mangle)]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub extern "C" fn librustzcash_sapling_spend_sig(
     ask: *const [c_uchar; 32],
     ar: *const [c_uchar; 32],
@@ -847,7 +887,8 @@ pub extern "C" fn librustzcash_sapling_spend_sig(
 ///
 /// You must provide the intended valueBalance so that we can internally check
 /// consistency.
-#[no_mangle]
+#[cfg_attr(not(feature = "wasm"), no_mangle)]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub extern "C" fn librustzcash_sapling_binding_sig(
     ctx: *const SaplingProvingContext,
     value_balance: i64,
@@ -875,7 +916,8 @@ pub extern "C" fn librustzcash_sapling_binding_sig(
 /// This function (using the proving context) constructs a Spend proof given the
 /// necessary witness information. It outputs `cv` (the value commitment) and
 /// `rk` (so that you don't have to compute it) along with the proof.
-#[no_mangle]
+#[cfg_attr(not(feature = "wasm"), no_mangle)]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub extern "C" fn librustzcash_sapling_spend_proof(
     ctx: *mut SaplingProvingContext,
     ak: *const [c_uchar; 32],
@@ -974,7 +1016,8 @@ pub extern "C" fn librustzcash_sapling_spend_proof(
 }
 
 /// Creates a Sapling proving context. Please free this when you're done.
-#[no_mangle]
+#[cfg_attr(not(feature = "wasm"), no_mangle)]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub extern "C" fn librustzcash_sapling_proving_ctx_init() -> *mut SaplingProvingContext {
     let ctx = Box::new(SaplingProvingContext::new());
 
@@ -983,13 +1026,15 @@ pub extern "C" fn librustzcash_sapling_proving_ctx_init() -> *mut SaplingProving
 
 /// Frees a Sapling proving context returned from
 /// [`librustzcash_sapling_proving_ctx_init`].
-#[no_mangle]
+#[cfg_attr(not(feature = "wasm"), no_mangle)]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub extern "C" fn librustzcash_sapling_proving_ctx_free(ctx: *mut SaplingProvingContext) {
     drop(unsafe { Box::from_raw(ctx) });
 }
 
 /// Derive the master ExtendedSpendingKey from a seed.
-#[no_mangle]
+#[cfg_attr(not(feature = "wasm"), no_mangle)]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub extern "C" fn librustzcash_zip32_xsk_master(
     seed: *const c_uchar,
     seedlen: size_t,
@@ -1004,7 +1049,8 @@ pub extern "C" fn librustzcash_zip32_xsk_master(
 }
 
 /// Derive a child ExtendedSpendingKey from a parent.
-#[no_mangle]
+#[cfg_attr(not(feature = "wasm"), no_mangle)]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub extern "C" fn librustzcash_zip32_xsk_derive(
     xsk_parent: *const [c_uchar; 169],
     i: u32,
@@ -1021,7 +1067,8 @@ pub extern "C" fn librustzcash_zip32_xsk_derive(
 }
 
 /// Derive a child ExtendedFullViewingKey from a parent.
-#[no_mangle]
+#[cfg_attr(not(feature = "wasm"), no_mangle)]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub extern "C" fn librustzcash_zip32_xfvk_derive(
     xfvk_parent: *const [c_uchar; 169],
     i: u32,
@@ -1043,7 +1090,8 @@ pub extern "C" fn librustzcash_zip32_xfvk_derive(
 }
 
 /// Derive a PaymentAddress from an ExtendedFullViewingKey.
-#[no_mangle]
+#[cfg_attr(not(feature = "wasm"), no_mangle)]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub extern "C" fn librustzcash_zip32_xfvk_address(
     xfvk: *const [c_uchar; 169],
     j: *const [c_uchar; 11],

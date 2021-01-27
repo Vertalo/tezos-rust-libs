@@ -1,3 +1,9 @@
+#[cfg(feature = "wasm")]
+#[allow(non_camel_case_types)]
+#[cfg(feature = "wasm")]
+type c_char = i8;
+
+#[cfg(not(feature = "wasm"))]
 use libc::c_char;
 use std::ffi::CStr;
 use std::path::Path;
@@ -23,8 +29,10 @@ use tracing_subscriber::{
 };
 
 #[cfg(not(target_os = "windows"))]
+#[cfg(not(feature = "wasm"))]
 use std::ffi::OsStr;
 #[cfg(not(target_os = "windows"))]
+#[cfg(not(feature = "wasm"))]
 use std::os::unix::ffi::OsStrExt;
 
 #[cfg(target_os = "windows")]
@@ -52,6 +60,7 @@ pub struct TracingHandle {
 }
 
 #[no_mangle]
+#[cfg(not(feature = "wasm"))]
 pub extern "C" fn tracing_init(
     #[cfg(not(target_os = "windows"))] log_path: *const u8,
     #[cfg(target_os = "windows")] log_path: *const u16,

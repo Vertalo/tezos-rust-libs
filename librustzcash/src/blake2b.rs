@@ -3,6 +3,14 @@
 // file COPYING or https://www.opensource.org/licenses/mit-license.php .
 
 use blake2b_simd::{State, PERSONALBYTES};
+#[cfg(feature = "wasm")]
+#[allow(non_camel_case_types)]
+#[cfg(feature = "wasm")]
+type c_uchar = u8;
+#[cfg(feature = "wasm")]
+#[allow(non_camel_case_types)]
+type size_t = usize;
+#[cfg(not(feature = "wasm"))]
 use libc::{c_uchar, size_t};
 use std::ptr;
 use std::slice;
