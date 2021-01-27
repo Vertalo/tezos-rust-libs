@@ -1,11 +1,9 @@
-#![no_std]
-#![cfg(any(target_arch = "x86_64", target_arch = "x86"))]
 #![feature(test)]
-extern crate aesni;
+
 extern crate test;
 
+use aesni::block_cipher::{BlockCipher, NewBlockCipher};
 use aesni::Aes256;
-use aesni::block_cipher_trait::BlockCipher;
 
 #[bench]
 pub fn aes256_encrypt(bh: &mut test::Bencher) {

@@ -194,13 +194,7 @@ impl<Node: Hashable> CommitmentTree<Node> {
 /// # Examples
 ///
 /// ```
-/// extern crate ff;
-/// extern crate pairing;
-/// extern crate rand_core;
-/// extern crate zcash_primitives;
-///
 /// use ff::{Field, PrimeField};
-/// use pairing::bls12_381::Fr;
 /// use rand_core::OsRng;
 /// use zcash_primitives::{
 ///     merkle_tree::{CommitmentTree, IncrementalWitness},
@@ -211,13 +205,13 @@ impl<Node: Hashable> CommitmentTree<Node> {
 ///
 /// let mut tree = CommitmentTree::<Node>::new();
 ///
-/// tree.append(Node::new(Fr::random(&mut rng).into_repr()));
-/// tree.append(Node::new(Fr::random(&mut rng).into_repr()));
+/// tree.append(Node::new(bls12_381::Scalar::random(&mut rng).to_repr()));
+/// tree.append(Node::new(bls12_381::Scalar::random(&mut rng).to_repr()));
 /// let mut witness = IncrementalWitness::from_tree(&tree);
 /// assert_eq!(witness.position(), 1);
 /// assert_eq!(tree.root(), witness.root());
 ///
-/// let cmu = Node::new(Fr::random(&mut rng).into_repr());
+/// let cmu = Node::new(bls12_381::Scalar::random(&mut rng).to_repr());
 /// tree.append(cmu);
 /// witness.append(cmu);
 /// assert_eq!(tree.root(), witness.root());
@@ -511,9 +505,8 @@ mod tests {
     use super::{CommitmentTree, Hashable, IncrementalWitness, MerklePath, PathFiller};
     use crate::sapling::Node;
 
-    use ff::PrimeFieldRepr;
     use hex;
-    use pairing::bls12_381::FrRepr;
+    use std::convert::TryInto;
     use std::io::{self, Read, Write};
 
     const HEX_EMPTY_ROOTS: [&str; 33] = [
@@ -1012,21 +1005,19 @@ mod tests {
         assert_eq!(tree.size(), 0);
 
         let mut witnesses = vec![];
-        let mut last_cm = None;
+        let mut last_cmu = None;
         let mut paths_i = 0;
         let mut witness_ser_i = 0;
         for i in 0..16 {
-            let mut cm = FrRepr::default();
-            cm.read_le(&hex::decode(commitments[i]).unwrap()[..])
-                .expect("length is 32 bytes");
+            let cmu = hex::decode(commitments[i]).unwrap();
 
-            let cm = Node::new(cm);
+            let cmu = Node::new(cmu[..].try_into().unwrap());
 
             // Witness here
-            witnesses.push((TestIncrementalWitness::from_tree(&tree), last_cm));
+            witnesses.push((TestIncrementalWitness::from_tree(&tree), last_cmu));
 
             // Now append a commitment to the tree
-            assert!(tree.append(cm).is_ok());
+            assert!(tree.append(cmu).is_ok());
 
             // Size incremented by one.
             assert_eq!(tree.size(), i + 1);
@@ -1039,7 +1030,7 @@ mod tests {
 
             for (witness, leaf) in witnesses.as_mut_slice() {
                 // Append the same commitment to all the witnesses
-                assert!(witness.append(cm).is_ok());
+                assert!(witness.append(cmu).is_ok());
 
                 if let Some(leaf) = leaf {
                     let path = witness.path().expect("should be able to create a path");
@@ -1063,7 +1054,7 @@ mod tests {
                 assert_eq!(witness.root(), tree.root());
             }
 
-            last_cm = Some(cm);
+            last_cmu = Some(cmu);
         }
 
         // Tree should be full now
