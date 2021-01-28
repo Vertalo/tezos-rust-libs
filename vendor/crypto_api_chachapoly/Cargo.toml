@@ -13,7 +13,7 @@
 [package]
 edition = "2018"
 name = "crypto_api_chachapoly"
-version = "0.2.2"
+version = "0.4.3"
 authors = ["Keziah Biermann <development@kizzycode.de>"]
 description = "An implementation of ChaCha20-IETF, Poly1305 and ChachaPoly-IETF for `crypto_api`"
 readme = "README.md"
@@ -26,16 +26,23 @@ overflow-checks = true
 [profile.release]
 overflow-checks = true
 [dependencies.crypto_api]
-version = "0.2.2"
+version = "0.2"
+[dev-dependencies.hex]
+version = "0.4"
 
-[dependencies.rand]
-version = "^0.6"
-optional = true
+[dev-dependencies.json]
+version = "0.12"
+[badges.appveyor]
+repository = "KizzyCode/crypto_api_chachapoly"
 
-[dependencies.sodiumoxide]
-version = "^0.2"
-optional = true
+[badges.is-it-maintained-issue-resolution]
+repository = "KizzyCode/crypto_api_chachapoly"
 
-[features]
-default = []
-run_examples = ["rand", "sodiumoxide"]
+[badges.is-it-maintained-open-issues]
+repository = "KizzyCode/crypto_api_chachapoly"
+
+[badges.maintenance]
+status = "passively-maintained"
+
+[badges.travis-ci]
+repository = "KizzyCode/crypto_api_chachapoly"

@@ -1,4 +1,4 @@
-use arch::*;
+use crate::arch::*;
 
 use core::mem;
 
@@ -21,15 +21,17 @@ macro_rules! expand_round {
         _mm_store_si128($enc_keys.as_mut_ptr().offset($pos), t1);
         let t1 = if $pos != 10 { _mm_aesimc_si128(t1) } else { t1 };
         _mm_store_si128($dec_keys.as_mut_ptr().offset($pos), t1);
-    }
+    };
 }
 
 #[inline(always)]
 pub(super) fn expand(key: &[u8; 16]) -> ([__m128i; 11], [__m128i; 11]) {
     unsafe {
-        let mut enc_keys: [__m128i; 11] = mem::uninitialized();
-        let mut dec_keys: [__m128i; 11] = mem::uninitialized();
+        let mut enc_keys: [__m128i; 11] = mem::zeroed();
+        let mut dec_keys: [__m128i; 11] = mem::zeroed();
 
+        // Safety: `loadu` supports unaligned loads
+        #[allow(clippy::cast_ptr_alignment)]
         let k = _mm_loadu_si128(key.as_ptr() as *const __m128i);
         _mm_store_si128(enc_keys.as_mut_ptr(), k);
         _mm_store_si128(dec_keys.as_mut_ptr(), k);

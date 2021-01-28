@@ -25,7 +25,8 @@ impl Parameters for MainNetwork {
             NetworkUpgrade::Overwinter => Some(347_500),
             NetworkUpgrade::Sapling => Some(419_200),
             NetworkUpgrade::Blossom => Some(653_600),
-            NetworkUpgrade::Heartwood => None,
+            NetworkUpgrade::Heartwood => Some(903_000),
+            NetworkUpgrade::Canopy => Some(1_046_400),
         }
     }
 }
@@ -40,7 +41,8 @@ impl Parameters for TestNetwork {
             NetworkUpgrade::Overwinter => Some(207_500),
             NetworkUpgrade::Sapling => Some(280_000),
             NetworkUpgrade::Blossom => Some(584_000),
-            NetworkUpgrade::Heartwood => None,
+            NetworkUpgrade::Heartwood => Some(903_800),
+            NetworkUpgrade::Canopy => Some(1_028_500),
         }
     }
 }
@@ -67,6 +69,10 @@ pub enum NetworkUpgrade {
     ///
     /// [Heartwood]: https://z.cash/upgrade/heartwood/
     Heartwood,
+    /// The [Canopy] network upgrade.
+    ///
+    /// [Canopy]: https://z.cash/upgrade/canopy/
+    Canopy,
 }
 
 impl fmt::Display for NetworkUpgrade {
@@ -76,6 +82,7 @@ impl fmt::Display for NetworkUpgrade {
             NetworkUpgrade::Sapling => write!(f, "Sapling"),
             NetworkUpgrade::Blossom => write!(f, "Blossom"),
             NetworkUpgrade::Heartwood => write!(f, "Heartwood"),
+            NetworkUpgrade::Canopy => write!(f, "Canopy"),
         }
     }
 }
@@ -87,6 +94,7 @@ impl NetworkUpgrade {
             NetworkUpgrade::Sapling => BranchId::Sapling,
             NetworkUpgrade::Blossom => BranchId::Blossom,
             NetworkUpgrade::Heartwood => BranchId::Heartwood,
+            NetworkUpgrade::Canopy => BranchId::Canopy,
         }
     }
 }
@@ -100,7 +108,10 @@ const UPGRADES_IN_ORDER: &[NetworkUpgrade] = &[
     NetworkUpgrade::Sapling,
     NetworkUpgrade::Blossom,
     NetworkUpgrade::Heartwood,
+    NetworkUpgrade::Canopy,
 ];
+
+pub const ZIP212_GRACE_PERIOD: u32 = 32256;
 
 /// A globally-unique identifier for a set of consensus rules within the Zcash chain.
 ///
@@ -127,6 +138,8 @@ pub enum BranchId {
     Blossom,
     /// The consensus rules deployed by [`NetworkUpgrade::Heartwood`].
     Heartwood,
+    /// The consensus rules deployed by [`NetworkUpgrade::Canopy`].
+    Canopy,
 }
 
 impl TryFrom<u32> for BranchId {
@@ -139,6 +152,7 @@ impl TryFrom<u32> for BranchId {
             0x76b8_09bb => Ok(BranchId::Sapling),
             0x2bb4_0e60 => Ok(BranchId::Blossom),
             0xf5b9_230b => Ok(BranchId::Heartwood),
+            0xe9ff_75a6 => Ok(BranchId::Canopy),
             _ => Err("Unknown consensus branch ID"),
         }
     }
@@ -152,6 +166,7 @@ impl From<BranchId> for u32 {
             BranchId::Sapling => 0x76b8_09bb,
             BranchId::Blossom => 0x2bb4_0e60,
             BranchId::Heartwood => 0xf5b9_230b,
+            BranchId::Canopy => 0xe9ff_75a6,
         }
     }
 }
@@ -230,8 +245,16 @@ mod tests {
             BranchId::Sapling,
         );
         assert_eq!(
+            BranchId::for_height::<MainNetwork>(903_000),
+            BranchId::Heartwood,
+        );
+        assert_eq!(
+            BranchId::for_height::<MainNetwork>(1_046_400),
+            BranchId::Canopy,
+        );
+        assert_eq!(
             BranchId::for_height::<MainNetwork>(5_000_000),
-            BranchId::Blossom,
+            BranchId::Canopy,
         );
     }
 }

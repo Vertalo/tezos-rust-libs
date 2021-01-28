@@ -1,17 +1,18 @@
+extern crate dirs_sys;
+
 use std::path::PathBuf;
 
 use BaseDirs;
 use UserDirs;
 use ProjectDirs;
 
-use unix;
-
 pub fn base_dirs() -> Option<BaseDirs> {
-    if let Some(home_dir)  = unix::home_dir() {
+    if let Some(home_dir)  = dirs_sys::home_dir() {
         let cache_dir      = home_dir.join("Library/Caches");
-        let config_dir     = home_dir.join("Library/Preferences");
+        let config_dir     = home_dir.join("Library/Application Support");
         let data_dir       = home_dir.join("Library/Application Support");
         let data_local_dir = data_dir.clone();
+        let preference_dir = home_dir.join("Library/Preferences");
 
         let base_dirs = BaseDirs {
             home_dir:       home_dir,
@@ -20,6 +21,7 @@ pub fn base_dirs() -> Option<BaseDirs> {
             data_dir:       data_dir,
             data_local_dir: data_local_dir,
             executable_dir: None,
+            preference_dir: preference_dir,
             runtime_dir:    None
         };
         Some(base_dirs)
@@ -29,7 +31,7 @@ pub fn base_dirs() -> Option<BaseDirs> {
 }
 
 pub fn user_dirs() -> Option<UserDirs> {
-    if let Some(home_dir) = unix::home_dir() {
+    if let Some(home_dir) = dirs_sys::home_dir() {
         let audio_dir     = home_dir.join("Music");
         let desktop_dir   = home_dir.join("Desktop");
         let document_dir  = home_dir.join("Documents");
@@ -58,11 +60,12 @@ pub fn user_dirs() -> Option<UserDirs> {
 }
 
 pub fn project_dirs_from_path(project_path: PathBuf) -> Option<ProjectDirs> {
-    if let Some(home_dir)  = unix::home_dir() {
+    if let Some(home_dir)  = dirs_sys::home_dir() {
         let cache_dir      = home_dir.join("Library/Caches").join(&project_path);
-        let config_dir     = home_dir.join("Library/Preferences").join(&project_path);
+        let config_dir     = home_dir.join("Library/Application Support").join(&project_path);
         let data_dir       = home_dir.join("Library/Application Support").join(&project_path);
         let data_local_dir = data_dir.clone();
+        let preference_dir = home_dir.join("Library/Preferences").join(&project_path);
 
         let project_dirs = ProjectDirs {
             project_path:   project_path,
@@ -70,6 +73,7 @@ pub fn project_dirs_from_path(project_path: PathBuf) -> Option<ProjectDirs> {
             config_dir:     config_dir,
             data_dir:       data_dir,
             data_local_dir: data_local_dir,
+            preference_dir: preference_dir,
             runtime_dir:    None,
         };
         Some(project_dirs)

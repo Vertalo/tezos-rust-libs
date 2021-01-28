@@ -1,10 +1,8 @@
-#![no_std]
 #![feature(test)]
-extern crate aes_soft;
 extern crate test;
 
+use aes_soft::block_cipher::{BlockCipher, NewBlockCipher};
 use aes_soft::Aes192;
-use aes_soft::block_cipher_trait::BlockCipher;
 
 #[bench]
 pub fn aes192_encrypt(bh: &mut test::Bencher) {
@@ -53,18 +51,3 @@ pub fn aes192_decrypt8(bh: &mut test::Bencher) {
     });
     bh.bytes = (input[0].len() * input.len()) as u64;
 }
-
-/*
-#[bench]
-pub fn ctr_aes192(bh: &mut test::Bencher) {
-    let mut cipher = aes::CtrAes192::new(&[0; 24], &[0; 16]);
-    let mut input = [0u8; 10000];
-
-
-    bh.iter(|| {
-        cipher.xor(&mut input);
-        test::black_box(&input);
-    });
-    bh.bytes = input.len() as u64;
-}
-*/

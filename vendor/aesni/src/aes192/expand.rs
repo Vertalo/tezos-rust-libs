@@ -1,4 +1,4 @@
-use arch::*;
+use crate::arch::*;
 
 use core::{mem, ptr};
 
@@ -24,29 +24,26 @@ macro_rules! expand_round {
         t3 = _mm_xor_si128(t3, t2);
 
         (t1, t3)
-    }}
+    }};
 }
 
 macro_rules! shuffle {
     ($a:expr, $b:expr, $imm:expr) => {
-        mem::transmute::<_, __m128i>(
-            _mm_shuffle_pd(mem::transmute($a), mem::transmute($b), $imm)
-        )
-    }
+        mem::transmute::<_, __m128i>(_mm_shuffle_pd(mem::transmute($a), mem::transmute($b), $imm))
+    };
 }
 
 #[inline(always)]
 pub(super) fn expand(key: &[u8; 24]) -> ([__m128i; 13], [__m128i; 13]) {
     unsafe {
-        let mut enc_keys: [__m128i; 13] = mem::uninitialized();
-        let mut dec_keys: [__m128i; 13] = mem::uninitialized();
+        let mut enc_keys: [__m128i; 13] = mem::zeroed();
+        let mut dec_keys: [__m128i; 13] = mem::zeroed();
 
         macro_rules! store {
             ($i:expr, $k:expr) => {
                 _mm_store_si128(enc_keys.as_mut_ptr().offset($i), $k);
-                _mm_store_si128(dec_keys.as_mut_ptr().offset($i),
-                    _mm_aesimc_si128($k));
-            }
+                _mm_store_si128(dec_keys.as_mut_ptr().offset($i), _mm_aesimc_si128($k));
+            };
         }
 
         // we are being extra pedantic here to remove out-of-bound access.
@@ -56,6 +53,9 @@ pub(super) fn expand(key: &[u8; 24]) -> ([__m128i; 13], [__m128i; 13]) {
         let (k0, k1l) = {
             let mut t = [0u8; 32];
             ptr::write(t.as_mut_ptr() as *mut [u8; 24], *key);
+
+            // Safety: `loadu` supports unaligned loads
+            #[allow(clippy::cast_ptr_alignment)]
             (
                 _mm_loadu_si128(t.as_ptr() as *const __m128i),
                 _mm_loadu_si128(t.as_ptr().offset(16) as *const __m128i),
