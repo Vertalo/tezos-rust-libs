@@ -1,5 +1,15 @@
+variables:
+  RUST_VERSION: "1.44.0"
+  OCAML_VERSION: "4.09"
+
 install-and-remove:
-  image: ocaml/opam
+  image: registry.gitlab.com/dannywillems/docker-ocaml-rust:${OCAML_VERSION}-${RUST_VERSION}
+  before_script:
+    - . $HOME/.cargo/env
+    - opam --version
+    - ocaml --version
+    - cargo --version
+    - rustc --version
   script:
     - opam pin --no-action tezos-rust-libs .
     - opam depext tezos-rust-libs

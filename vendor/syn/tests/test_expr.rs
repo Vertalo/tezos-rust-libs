@@ -1,28 +1,40 @@
 #[macro_use]
 mod macros;
 
-use std::str::FromStr;
-
-use proc_macro2::{Delimiter, Group, Punct, Spacing, TokenStream, TokenTree};
+use proc_macro2::{Delimiter, Group, Ident, Punct, Spacing, Span, TokenStream, TokenTree};
 use quote::quote;
 use std::iter::FromIterator;
 use syn::{Expr, ExprRange};
 
 #[test]
 fn test_expr_parse() {
-    let code = "..100u32";
-    let tt = TokenStream::from_str(code).unwrap();
-    let expr: Expr = syn::parse2(tt.clone()).unwrap();
-    let expr_range: ExprRange = syn::parse2(tt).unwrap();
-    assert_eq!(expr, Expr::Range(expr_range));
+    let tokens = quote!(..100u32);
+    snapshot!(tokens as Expr, @r###"
+    Expr::Range {
+        limits: HalfOpen,
+        to: Some(Expr::Lit {
+            lit: 100u32,
+        }),
+    }
+    "###);
+
+    let tokens = quote!(..100u32);
+    snapshot!(tokens as ExprRange, @r###"
+    ExprRange {
+        limits: HalfOpen,
+        to: Some(Expr::Lit {
+            lit: 100u32,
+        }),
+    }
+    "###);
 }
 
 #[test]
 fn test_await() {
     // Must not parse as Expr::Field.
-    let expr = syn::parse_str::<Expr>("fut.await").unwrap();
+    let tokens = quote!(fut.await);
 
-    snapshot!(expr, @r###"
+    snapshot!(tokens as Expr, @r###"
     Expr::Await {
         base: Expr::Path {
             path: Path {
@@ -36,6 +48,74 @@ fn test_await() {
         },
     }
     "###);
+}
+
+#[rustfmt::skip]
+#[test]
+fn test_tuple_multi_index() {
+    for &input in &[
+        "tuple.0.0",
+        "tuple .0.0",
+        "tuple. 0.0",
+        "tuple.0 .0",
+        "tuple.0. 0",
+        "tuple . 0 . 0",
+    ] {
+        snapshot!(input as Expr, @r###"
+        Expr::Field {
+            base: Expr::Field {
+                base: Expr::Path {
+                    path: Path {
+                        segments: [
+                            PathSegment {
+                                ident: "tuple",
+                                arguments: None,
+                            },
+                        ],
+                    },
+                },
+                member: Unnamed(Index {
+                    index: 0,
+                }),
+            },
+            member: Unnamed(Index {
+                index: 0,
+            }),
+        }
+        "###);
+    }
+
+    for tokens in vec![
+        quote!(tuple.0.0),
+        quote!(tuple .0.0),
+        quote!(tuple. 0.0),
+        quote!(tuple.0 .0),
+        quote!(tuple.0. 0),
+        quote!(tuple . 0 . 0),
+    ] {
+        snapshot!(tokens as Expr, @r###"
+        Expr::Field {
+            base: Expr::Field {
+                base: Expr::Path {
+                    path: Path {
+                        segments: [
+                            PathSegment {
+                                ident: "tuple",
+                                arguments: None,
+                            },
+                        ],
+                    },
+                },
+                member: Unnamed(Index {
+                    index: 0,
+                }),
+            },
+            member: Unnamed(Index {
+                index: 0,
+            }),
+        }
+        "###);
+    }
 }
 
 #[test]
@@ -161,6 +241,62 @@ fn test_macro_variable_struct() {
                 },
             ],
         },
+    }
+    "###);
+}
+
+#[test]
+fn test_macro_variable_match_arm() {
+    // mimics the token stream corresponding to `match v { _ => $expr }`
+    let tokens = TokenStream::from_iter(vec![
+        TokenTree::Ident(Ident::new("match", Span::call_site())),
+        TokenTree::Ident(Ident::new("v", Span::call_site())),
+        TokenTree::Group(Group::new(
+            Delimiter::Brace,
+            TokenStream::from_iter(vec![
+                TokenTree::Punct(Punct::new('_', Spacing::Alone)),
+                TokenTree::Punct(Punct::new('=', Spacing::Joint)),
+                TokenTree::Punct(Punct::new('>', Spacing::Alone)),
+                TokenTree::Group(Group::new(Delimiter::None, quote! { #[a] () })),
+            ]),
+        )),
+    ]);
+
+    snapshot!(tokens as Expr, @r###"
+    Expr::Match {
+        expr: Expr::Path {
+            path: Path {
+                segments: [
+                    PathSegment {
+                        ident: "v",
+                        arguments: None,
+                    },
+                ],
+            },
+        },
+        arms: [
+            Arm {
+                pat: Pat::Wild,
+                body: Expr::Group {
+                    expr: Expr::Tuple {
+                        attrs: [
+                            Attribute {
+                                style: Outer,
+                                path: Path {
+                                    segments: [
+                                        PathSegment {
+                                            ident: "a",
+                                            arguments: None,
+                                        },
+                                    ],
+                                },
+                                tokens: TokenStream(``),
+                            },
+                        ],
+                    },
+                },
+            },
+        ],
     }
     "###);
 }

@@ -13,7 +13,7 @@
 [package]
 edition = "2018"
 name = "getrandom"
-version = "0.1.14"
+version = "0.1.15"
 authors = ["The Rand Project Developers"]
 exclude = ["utils/*", ".*", "appveyor.yml"]
 description = "A small cross-platform library for retrieving random data from system source"

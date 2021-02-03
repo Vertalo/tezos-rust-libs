@@ -1,3 +1,7 @@
+extern crate crossbeam_queue;
+extern crate crossbeam_utils;
+extern crate rand;
+
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crossbeam_queue::SegQueue;

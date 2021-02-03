@@ -9,11 +9,21 @@ use super::{
     LENGTH_COMPRESSED_G1_BYTES, LENGTH_FQ_BYTES, LENGTH_FR_BYTES, LENGTH_UNCOMPRESSED_G1_BYTES,
 };
 
-use libc::c_uchar;
 use rand::rngs::OsRng;
 
+#[cfg(not(feature = "wasm"))]
+use libc::c_uchar;
+
+#[cfg(feature = "wasm")]
+#[allow(non_camel_case_types)]
+#[cfg(feature = "wasm")]
+type c_uchar = u8;
+#[cfg(feature = "wasm")]
+use wasm_bindgen::prelude::*;
+
 // Check that a byte array represents a valid uncompressed point.
-#[no_mangle]
+#[cfg_attr(not(feature = "wasm"), no_mangle)]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub extern "C" fn rustc_bls12_381_g1_uncompressed_check_bytes(
     uncompressed: *const [c_uchar; LENGTH_UNCOMPRESSED_G1_BYTES],
 ) -> bool {
@@ -23,7 +33,8 @@ pub extern "C" fn rustc_bls12_381_g1_uncompressed_check_bytes(
 }
 
 // Check that a byte array represents a valid compressed point.
-#[no_mangle]
+#[cfg_attr(not(feature = "wasm"), no_mangle)]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub extern "C" fn rustc_bls12_381_g1_compressed_check_bytes(
     compressed: *const [c_uchar; LENGTH_COMPRESSED_G1_BYTES],
 ) -> bool {
@@ -42,7 +53,8 @@ pub(crate) fn g1_compressed_of_uncompressed(
     compressed
 }
 
-#[no_mangle]
+#[cfg_attr(not(feature = "wasm"), no_mangle)]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub extern "C" fn rustc_bls12_381_g1_compressed_of_uncompressed(
     buffer: *mut [c_uchar; LENGTH_COMPRESSED_G1_BYTES],
     uncompressed: *const [c_uchar; LENGTH_UNCOMPRESSED_G1_BYTES],
@@ -61,7 +73,8 @@ pub(crate) fn g1_uncompressed_of_compressed(
     uncompressed
 }
 // Get the uncompressed version of a point from the compressed version
-#[no_mangle]
+#[cfg_attr(not(feature = "wasm"), no_mangle)]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub extern "C" fn rustc_bls12_381_g1_uncompressed_of_compressed(
     buffer: *mut [c_uchar; LENGTH_UNCOMPRESSED_G1_BYTES],
     compressed: *const [c_uchar; LENGTH_COMPRESSED_G1_BYTES],
@@ -79,7 +92,8 @@ pub(crate) fn g1_uncompressed_generate_zero() -> bls12_381::G1Uncompressed {
 }
 
 // Get the zero of the curve
-#[no_mangle]
+#[cfg_attr(not(feature = "wasm"), no_mangle)]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub extern "C" fn rustc_bls12_381_g1_zero(buffer: *mut [c_uchar; LENGTH_UNCOMPRESSED_G1_BYTES]) {
     let uncompressed_form = g1_uncompressed_generate_zero();
     write_uncompressed_g1(buffer, uncompressed_form);
@@ -91,14 +105,16 @@ pub(crate) fn g1_uncompressed_generate_one() -> bls12_381::G1Uncompressed {
     uncompressed_form
 }
 // Get a fixed generator of the curve
-#[no_mangle]
+#[cfg_attr(not(feature = "wasm"), no_mangle)]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub extern "C" fn rustc_bls12_381_g1_one(buffer: *mut [c_uchar; LENGTH_UNCOMPRESSED_G1_BYTES]) {
     let uncompressed_form = g1_uncompressed_generate_one();
     write_uncompressed_g1(buffer, uncompressed_form);
 }
 
 // Get a random point on the curve
-#[no_mangle]
+#[cfg_attr(not(feature = "wasm"), no_mangle)]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub extern "C" fn rustc_bls12_381_g1_random(buffer: *mut [c_uchar; LENGTH_UNCOMPRESSED_G1_BYTES]) {
     let random_g1 = bls12_381::G1::random(&mut OsRng);
     let uncompressed_form = bls12_381::G1Uncompressed::from_affine(random_g1.into_affine());
@@ -116,7 +132,8 @@ pub(crate) fn g1_uncompressed_add(
 }
 // Add two points of the curve.
 // !! The two points must be valid. Undefined behaviors otherwise.
-#[no_mangle]
+#[cfg_attr(not(feature = "wasm"), no_mangle)]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub extern "C" fn rustc_bls12_381_g1_add(
     buffer: *mut [c_uchar; LENGTH_UNCOMPRESSED_G1_BYTES],
     g1: *const [c_uchar; LENGTH_UNCOMPRESSED_G1_BYTES],
@@ -130,7 +147,8 @@ pub extern "C" fn rustc_bls12_381_g1_add(
 
 // Compute the opposite of the point.
 // !! The point must be valid. Undefined behaviors otherwise.
-#[no_mangle]
+#[cfg_attr(not(feature = "wasm"), no_mangle)]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub extern "C" fn rustc_bls12_381_g1_negate(
     buffer: *mut [c_uchar; LENGTH_UNCOMPRESSED_G1_BYTES],
     g: *const [c_uchar; LENGTH_UNCOMPRESSED_G1_BYTES],
@@ -145,7 +163,8 @@ pub extern "C" fn rustc_bls12_381_g1_negate(
 
 // Check if two points are algebraically equals
 // !! The points must be valid. Undefined behaviors otherwise.
-#[no_mangle]
+#[cfg_attr(not(feature = "wasm"), no_mangle)]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub extern "C" fn rustc_bls12_381_g1_eq(
     g1: *const [c_uchar; LENGTH_UNCOMPRESSED_G1_BYTES],
     g2: *const [c_uchar; LENGTH_UNCOMPRESSED_G1_BYTES],
@@ -159,7 +178,8 @@ pub extern "C" fn rustc_bls12_381_g1_eq(
 
 // Check if the given point is the zero of the curve
 // !! The point must be valid. Undefined behaviors otherwise.
-#[no_mangle]
+#[cfg_attr(not(feature = "wasm"), no_mangle)]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub extern "C" fn rustc_bls12_381_g1_is_zero(
     g: *const [c_uchar; LENGTH_UNCOMPRESSED_G1_BYTES],
 ) -> bool {
@@ -168,7 +188,8 @@ pub extern "C" fn rustc_bls12_381_g1_is_zero(
     g.is_zero()
 }
 
-#[no_mangle]
+#[cfg_attr(not(feature = "wasm"), no_mangle)]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub extern "C" fn rustc_bls12_381_g1_double(
     buffer: *mut [c_uchar; LENGTH_UNCOMPRESSED_G1_BYTES],
     g: *const [c_uchar; LENGTH_UNCOMPRESSED_G1_BYTES],
@@ -183,7 +204,8 @@ pub extern "C" fn rustc_bls12_381_g1_double(
 
 // Multiply a point by a scalar (an Fr element)
 // !! The point must be valid. Undefined behaviors otherwise.
-#[no_mangle]
+#[cfg_attr(not(feature = "wasm"), no_mangle)]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub extern "C" fn rustc_bls12_381_g1_mul(
     buffer: *mut [c_uchar; LENGTH_UNCOMPRESSED_G1_BYTES],
     g: *const [c_uchar; LENGTH_UNCOMPRESSED_G1_BYTES],
@@ -199,7 +221,8 @@ pub extern "C" fn rustc_bls12_381_g1_mul(
 }
 
 // --------------- G1 Compressed ---------------------
-#[no_mangle]
+#[cfg_attr(not(feature = "wasm"), no_mangle)]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub extern "C" fn rustc_bls12_381_g1_compressed_eq(
     g1: *const [c_uchar; LENGTH_COMPRESSED_G1_BYTES],
     g2: *const [c_uchar; LENGTH_COMPRESSED_G1_BYTES],
@@ -211,7 +234,8 @@ pub extern "C" fn rustc_bls12_381_g1_compressed_eq(
     g1 == g2
 }
 
-#[no_mangle]
+#[cfg_attr(not(feature = "wasm"), no_mangle)]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub extern "C" fn rustc_bls12_381_g1_compressed_negate(
     buffer: *mut [c_uchar; LENGTH_COMPRESSED_G1_BYTES],
     g: *const [c_uchar; LENGTH_COMPRESSED_G1_BYTES],
@@ -224,7 +248,8 @@ pub extern "C" fn rustc_bls12_381_g1_compressed_negate(
     write_compressed_g1(buffer, g);
 }
 
-#[no_mangle]
+#[cfg_attr(not(feature = "wasm"), no_mangle)]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub extern "C" fn rustc_bls12_381_g1_compressed_add(
     buffer: *mut [c_uchar; LENGTH_COMPRESSED_G1_BYTES],
     g1: *const [c_uchar; LENGTH_COMPRESSED_G1_BYTES],
@@ -245,7 +270,8 @@ pub extern "C" fn rustc_bls12_381_g1_compressed_add(
     write_compressed_g1(buffer, result);
 }
 
-#[no_mangle]
+#[cfg_attr(not(feature = "wasm"), no_mangle)]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub extern "C" fn rustc_bls12_381_g1_compressed_is_zero(
     g: *const [c_uchar; LENGTH_COMPRESSED_G1_BYTES],
 ) -> bool {
@@ -254,7 +280,8 @@ pub extern "C" fn rustc_bls12_381_g1_compressed_is_zero(
     g.is_zero()
 }
 
-#[no_mangle]
+#[cfg_attr(not(feature = "wasm"), no_mangle)]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub extern "C" fn rustc_bls12_381_g1_compressed_zero(
     buffer: *mut [c_uchar; LENGTH_COMPRESSED_G1_BYTES],
 ) {
@@ -263,7 +290,8 @@ pub extern "C" fn rustc_bls12_381_g1_compressed_zero(
     write_compressed_g1(buffer, compressed_form);
 }
 
-#[no_mangle]
+#[cfg_attr(not(feature = "wasm"), no_mangle)]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub extern "C" fn rustc_bls12_381_g1_compressed_one(
     buffer: *mut [c_uchar; LENGTH_COMPRESSED_G1_BYTES],
 ) {
@@ -272,7 +300,8 @@ pub extern "C" fn rustc_bls12_381_g1_compressed_one(
     write_compressed_g1(buffer, compressed_form);
 }
 
-#[no_mangle]
+#[cfg_attr(not(feature = "wasm"), no_mangle)]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub extern "C" fn rustc_bls12_381_g1_compressed_random(
     buffer: *mut [c_uchar; LENGTH_COMPRESSED_G1_BYTES],
 ) {
@@ -281,7 +310,8 @@ pub extern "C" fn rustc_bls12_381_g1_compressed_random(
     write_compressed_g1(buffer, compressed_form);
 }
 
-#[no_mangle]
+#[cfg_attr(not(feature = "wasm"), no_mangle)]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub extern "C" fn rustc_bls12_381_g1_compressed_double(
     buffer: *mut [c_uchar; LENGTH_COMPRESSED_G1_BYTES],
     g: *const [c_uchar; LENGTH_COMPRESSED_G1_BYTES],
@@ -294,7 +324,8 @@ pub extern "C" fn rustc_bls12_381_g1_compressed_double(
     write_compressed_g1(buffer, result);
 }
 
-#[no_mangle]
+#[cfg_attr(not(feature = "wasm"), no_mangle)]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub extern "C" fn rustc_bls12_381_g1_compressed_mul(
     buffer: *mut [c_uchar; LENGTH_COMPRESSED_G1_BYTES],
     g: *const [c_uchar; LENGTH_COMPRESSED_G1_BYTES],
@@ -309,7 +340,8 @@ pub extern "C" fn rustc_bls12_381_g1_compressed_mul(
     write_compressed_g1(buffer, result);
 }
 
-#[no_mangle]
+#[cfg_attr(not(feature = "wasm"), no_mangle)]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub extern "C" fn rustc_bls12_381_g1_build_from_components(
     buffer: *mut [c_uchar; LENGTH_UNCOMPRESSED_G1_BYTES],
     x: *const [c_uchar; LENGTH_FQ_BYTES],

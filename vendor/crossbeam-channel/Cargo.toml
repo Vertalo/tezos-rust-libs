@@ -12,7 +12,7 @@
 
 [package]
 name = "crossbeam-channel"
-version = "0.4.2"
+version = "0.4.4"
 authors = ["The Crossbeam Project Developers"]
 description = "Multi-producer multi-consumer channels for message passing"
 homepage = "https://github.com/crossbeam-rs/crossbeam/tree/master/crossbeam-channel"
@@ -20,7 +20,7 @@ documentation = "https://docs.rs/crossbeam-channel"
 readme = "README.md"
 keywords = ["channel", "mpmc", "select", "golang", "message"]
 categories = ["algorithms", "concurrency", "data-structures"]
-license = "MIT/Apache-2.0 AND BSD-2-Clause"
+license = "MIT OR Apache-2.0"
 repository = "https://github.com/crossbeam-rs/crossbeam"
 [dependencies.crossbeam-utils]
 version = "0.7"
