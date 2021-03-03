@@ -1,11 +1,5 @@
-use super::reader::{read_fq12, read_uncompressed_g1, read_uncompressed_g2};
-use super::writer::write_fq12;
-
-use super::{LENGTH_FQ12_BYTES, LENGTH_UNCOMPRESSED_G1_BYTES, LENGTH_UNCOMPRESSED_G2_BYTES};
-use group::EncodedPoint;
-use pairing::bls12_381;
-use pairing::Engine;
-use pairing::PairingCurveAffine;
+use super::{LENGTH_UNCOMPRESSED_G1_BYTES, LENGTH_UNCOMPRESSED_G2_BYTES};
+use bls12_381::multi_miller_loop;
 
 #[cfg(not(feature = "wasm"))]
 use libc::c_uchar;
@@ -19,108 +13,74 @@ use wasm_bindgen::prelude::*;
 
 #[cfg_attr(not(feature = "wasm"), no_mangle)]
 #[cfg_attr(feature = "wasm", wasm_bindgen)]
-pub extern "C" fn rustc_bls12_381_pairing_miller_loop_simple(
-    buffer: *mut [c_uchar; LENGTH_FQ12_BYTES],
+pub extern "C" fn rustc_bls12_381_pairing_check_1(
     g1: *const [c_uchar; LENGTH_UNCOMPRESSED_G1_BYTES],
     g2: *const [c_uchar; LENGTH_UNCOMPRESSED_G2_BYTES],
-) {
+) -> bool {
     let g1 = unsafe { &*g1 };
     let g2 = unsafe { &*g2 };
-    let g1 = read_uncompressed_g1(g1)
-        .into_affine_unchecked()
-        .unwrap()
-        .prepare();
-    let g2 = read_uncompressed_g2(g2)
-        .into_affine_unchecked()
-        .unwrap()
-        .prepare();
-    let result_miller_loop = bls12_381::Bls12::miller_loop([(&g1, &g2)].iter());
-    write_fq12(buffer, result_miller_loop)
+    let g1 = bls12_381::G1Affine::from_uncompressed_unchecked(g1).unwrap();
+    let g2 = bls12_381::G2Affine::from_uncompressed_unchecked(g2).unwrap();
+    let g2 = bls12_381::G2Prepared::from(g2);
+    let res = multi_miller_loop(&[(&g1, &g2)]).final_exponentiation();
+    res == bls12_381::Gt::identity()
 }
 
 #[cfg_attr(not(feature = "wasm"), no_mangle)]
 #[cfg_attr(feature = "wasm", wasm_bindgen)]
-pub extern "C" fn rustc_bls12_381_pairing_miller_loop_2(
-    buffer: *mut [c_uchar; LENGTH_FQ12_BYTES],
+pub extern "C" fn rustc_bls12_381_pairing_check_2(
     g1_1: *const [c_uchar; LENGTH_UNCOMPRESSED_G1_BYTES],
     g1_2: *const [c_uchar; LENGTH_UNCOMPRESSED_G1_BYTES],
     g2_1: *const [c_uchar; LENGTH_UNCOMPRESSED_G2_BYTES],
     g2_2: *const [c_uchar; LENGTH_UNCOMPRESSED_G2_BYTES],
-) {
+) -> bool {
     let g1_1 = unsafe { &*g1_1 };
     let g1_2 = unsafe { &*g1_2 };
     let g2_1 = unsafe { &*g2_1 };
     let g2_2 = unsafe { &*g2_2 };
-    let g1_1 = read_uncompressed_g1(g1_1)
-        .into_affine_unchecked()
-        .unwrap()
-        .prepare();
-    let g1_2 = read_uncompressed_g1(g1_2)
-        .into_affine_unchecked()
-        .unwrap()
-        .prepare();
-    let g2_1 = read_uncompressed_g2(g2_1)
-        .into_affine_unchecked()
-        .unwrap()
-        .prepare();
-    let g2_2 = read_uncompressed_g2(g2_2)
-        .into_affine_unchecked()
-        .unwrap()
-        .prepare();
-    let result_miller_loop = bls12_381::Bls12::miller_loop([(&g1_1, &g2_1), (&g1_2, &g2_2)].iter());
-    write_fq12(buffer, result_miller_loop)
+    let g1_1 = bls12_381::G1Affine::from_uncompressed_unchecked(g1_1).unwrap();
+    let g1_2 = bls12_381::G1Affine::from_uncompressed_unchecked(g1_2).unwrap();
+    let g2_1 = bls12_381::G2Affine::from_uncompressed_unchecked(g2_1).unwrap();
+    let g2_1 = bls12_381::G2Prepared::from(g2_1);
+    let g2_2 = bls12_381::G2Affine::from_uncompressed_unchecked(g2_2).unwrap();
+    let g2_2 = bls12_381::G2Prepared::from(g2_2);
+    let res = multi_miller_loop(&[(&g1_1, &g2_1), (&g1_2, &g2_2)]).final_exponentiation();
+    res == bls12_381::Gt::identity()
 }
 
 #[cfg_attr(not(feature = "wasm"), no_mangle)]
 #[cfg_attr(feature = "wasm", wasm_bindgen)]
-pub extern "C" fn rustc_bls12_381_pairing_miller_loop_3(
-    buffer: *mut [c_uchar; LENGTH_FQ12_BYTES],
+pub extern "C" fn rustc_bls12_381_pairing_check_3(
     g1_1: *const [c_uchar; LENGTH_UNCOMPRESSED_G1_BYTES],
     g1_2: *const [c_uchar; LENGTH_UNCOMPRESSED_G1_BYTES],
     g1_3: *const [c_uchar; LENGTH_UNCOMPRESSED_G1_BYTES],
     g2_1: *const [c_uchar; LENGTH_UNCOMPRESSED_G2_BYTES],
     g2_2: *const [c_uchar; LENGTH_UNCOMPRESSED_G2_BYTES],
     g2_3: *const [c_uchar; LENGTH_UNCOMPRESSED_G2_BYTES],
-) {
+) -> bool {
     let g1_1 = unsafe { &*g1_1 };
     let g1_2 = unsafe { &*g1_2 };
     let g1_3 = unsafe { &*g1_3 };
     let g2_1 = unsafe { &*g2_1 };
     let g2_2 = unsafe { &*g2_2 };
     let g2_3 = unsafe { &*g2_3 };
-    let g1_1 = read_uncompressed_g1(g1_1)
-        .into_affine_unchecked()
-        .unwrap()
-        .prepare();
-    let g1_2 = read_uncompressed_g1(g1_2)
-        .into_affine_unchecked()
-        .unwrap()
-        .prepare();
-    let g1_3 = read_uncompressed_g1(g1_3)
-        .into_affine_unchecked()
-        .unwrap()
-        .prepare();
-    let g2_1 = read_uncompressed_g2(g2_1)
-        .into_affine_unchecked()
-        .unwrap()
-        .prepare();
-    let g2_2 = read_uncompressed_g2(g2_2)
-        .into_affine_unchecked()
-        .unwrap()
-        .prepare();
-    let g2_3 = read_uncompressed_g2(g2_3)
-        .into_affine_unchecked()
-        .unwrap()
-        .prepare();
-    let result_miller_loop =
-        bls12_381::Bls12::miller_loop([(&g1_1, &g2_1), (&g1_2, &g2_2), (&g1_3, &g2_3)].iter());
-    write_fq12(buffer, result_miller_loop)
+    let g1_1 = bls12_381::G1Affine::from_uncompressed_unchecked(g1_1).unwrap();
+    let g1_2 = bls12_381::G1Affine::from_uncompressed_unchecked(g1_2).unwrap();
+    let g1_3 = bls12_381::G1Affine::from_uncompressed_unchecked(g1_3).unwrap();
+    let g2_1 = bls12_381::G2Affine::from_uncompressed_unchecked(g2_1).unwrap();
+    let g2_1 = bls12_381::G2Prepared::from(g2_1);
+    let g2_2 = bls12_381::G2Affine::from_uncompressed_unchecked(g2_2).unwrap();
+    let g2_2 = bls12_381::G2Prepared::from(g2_2);
+    let g2_3 = bls12_381::G2Affine::from_uncompressed_unchecked(g2_3).unwrap();
+    let g2_3 = bls12_381::G2Prepared::from(g2_3);
+    let res =
+        multi_miller_loop(&[(&g1_1, &g2_1), (&g1_2, &g2_2), (&g1_3, &g2_3)]).final_exponentiation();
+    res == bls12_381::Gt::identity()
 }
 
 #[cfg_attr(not(feature = "wasm"), no_mangle)]
 #[cfg_attr(feature = "wasm", wasm_bindgen)]
-pub extern "C" fn rustc_bls12_381_pairing_miller_loop_4(
-    buffer: *mut [c_uchar; LENGTH_FQ12_BYTES],
+pub extern "C" fn rustc_bls12_381_pairing_check_4(
     g1_1: *const [c_uchar; LENGTH_UNCOMPRESSED_G1_BYTES],
     g1_2: *const [c_uchar; LENGTH_UNCOMPRESSED_G1_BYTES],
     g1_3: *const [c_uchar; LENGTH_UNCOMPRESSED_G1_BYTES],
@@ -129,7 +89,7 @@ pub extern "C" fn rustc_bls12_381_pairing_miller_loop_4(
     g2_2: *const [c_uchar; LENGTH_UNCOMPRESSED_G2_BYTES],
     g2_3: *const [c_uchar; LENGTH_UNCOMPRESSED_G2_BYTES],
     g2_4: *const [c_uchar; LENGTH_UNCOMPRESSED_G2_BYTES],
-) {
+) -> bool {
     let g1_1 = unsafe { &*g1_1 };
     let g1_2 = unsafe { &*g1_2 };
     let g1_3 = unsafe { &*g1_3 };
@@ -138,54 +98,31 @@ pub extern "C" fn rustc_bls12_381_pairing_miller_loop_4(
     let g2_2 = unsafe { &*g2_2 };
     let g2_3 = unsafe { &*g2_3 };
     let g2_4 = unsafe { &*g2_4 };
-    let g1_1 = read_uncompressed_g1(g1_1)
-        .into_affine_unchecked()
-        .unwrap()
-        .prepare();
-    let g1_2 = read_uncompressed_g1(g1_2)
-        .into_affine_unchecked()
-        .unwrap()
-        .prepare();
-    let g1_3 = read_uncompressed_g1(g1_3)
-        .into_affine_unchecked()
-        .unwrap()
-        .prepare();
-    let g1_4 = read_uncompressed_g1(g1_4)
-        .into_affine_unchecked()
-        .unwrap()
-        .prepare();
-    let g2_1 = read_uncompressed_g2(g2_1)
-        .into_affine_unchecked()
-        .unwrap()
-        .prepare();
-    let g2_2 = read_uncompressed_g2(g2_2)
-        .into_affine_unchecked()
-        .unwrap()
-        .prepare();
-    let g2_3 = read_uncompressed_g2(g2_3)
-        .into_affine_unchecked()
-        .unwrap()
-        .prepare();
-    let g2_4 = read_uncompressed_g2(g2_4)
-        .into_affine_unchecked()
-        .unwrap()
-        .prepare();
-    let result_miller_loop = bls12_381::Bls12::miller_loop(
-        [
-            (&g1_1, &g2_1),
-            (&g1_2, &g2_2),
-            (&g1_3, &g2_3),
-            (&g1_4, &g2_4),
-        ]
-        .iter(),
-    );
-    write_fq12(buffer, result_miller_loop)
+    let g1_1 = bls12_381::G1Affine::from_uncompressed_unchecked(g1_1).unwrap();
+    let g1_2 = bls12_381::G1Affine::from_uncompressed_unchecked(g1_2).unwrap();
+    let g1_3 = bls12_381::G1Affine::from_uncompressed_unchecked(g1_3).unwrap();
+    let g1_4 = bls12_381::G1Affine::from_uncompressed_unchecked(g1_4).unwrap();
+    let g2_1 = bls12_381::G2Affine::from_uncompressed_unchecked(g2_1).unwrap();
+    let g2_1 = bls12_381::G2Prepared::from(g2_1);
+    let g2_2 = bls12_381::G2Affine::from_uncompressed_unchecked(g2_2).unwrap();
+    let g2_2 = bls12_381::G2Prepared::from(g2_2);
+    let g2_3 = bls12_381::G2Affine::from_uncompressed_unchecked(g2_3).unwrap();
+    let g2_3 = bls12_381::G2Prepared::from(g2_3);
+    let g2_4 = bls12_381::G2Affine::from_uncompressed_unchecked(g2_4).unwrap();
+    let g2_4 = bls12_381::G2Prepared::from(g2_4);
+    let res = multi_miller_loop(&[
+        (&g1_1, &g2_1),
+        (&g1_2, &g2_2),
+        (&g1_3, &g2_3),
+        (&g1_4, &g2_4),
+    ])
+    .final_exponentiation();
+    res == bls12_381::Gt::identity()
 }
 
 #[cfg_attr(not(feature = "wasm"), no_mangle)]
 #[cfg_attr(feature = "wasm", wasm_bindgen)]
-pub extern "C" fn rustc_bls12_381_pairing_miller_loop_5(
-    buffer: *mut [c_uchar; LENGTH_FQ12_BYTES],
+pub extern "C" fn rustc_bls12_381_pairing_check_5(
     g1_1: *const [c_uchar; LENGTH_UNCOMPRESSED_G1_BYTES],
     g1_2: *const [c_uchar; LENGTH_UNCOMPRESSED_G1_BYTES],
     g1_3: *const [c_uchar; LENGTH_UNCOMPRESSED_G1_BYTES],
@@ -196,7 +133,7 @@ pub extern "C" fn rustc_bls12_381_pairing_miller_loop_5(
     g2_3: *const [c_uchar; LENGTH_UNCOMPRESSED_G2_BYTES],
     g2_4: *const [c_uchar; LENGTH_UNCOMPRESSED_G2_BYTES],
     g2_5: *const [c_uchar; LENGTH_UNCOMPRESSED_G2_BYTES],
-) {
+) -> bool {
     let g1_1 = unsafe { &*g1_1 };
     let g1_2 = unsafe { &*g1_2 };
     let g1_3 = unsafe { &*g1_3 };
@@ -207,63 +144,35 @@ pub extern "C" fn rustc_bls12_381_pairing_miller_loop_5(
     let g2_3 = unsafe { &*g2_3 };
     let g2_4 = unsafe { &*g2_4 };
     let g2_5 = unsafe { &*g2_5 };
-    let g1_1 = read_uncompressed_g1(g1_1)
-        .into_affine_unchecked()
-        .unwrap()
-        .prepare();
-    let g1_2 = read_uncompressed_g1(g1_2)
-        .into_affine_unchecked()
-        .unwrap()
-        .prepare();
-    let g1_3 = read_uncompressed_g1(g1_3)
-        .into_affine_unchecked()
-        .unwrap()
-        .prepare();
-    let g1_4 = read_uncompressed_g1(g1_4)
-        .into_affine_unchecked()
-        .unwrap()
-        .prepare();
-    let g1_5 = read_uncompressed_g1(g1_5)
-        .into_affine_unchecked()
-        .unwrap()
-        .prepare();
-    let g2_1 = read_uncompressed_g2(g2_1)
-        .into_affine_unchecked()
-        .unwrap()
-        .prepare();
-    let g2_2 = read_uncompressed_g2(g2_2)
-        .into_affine_unchecked()
-        .unwrap()
-        .prepare();
-    let g2_3 = read_uncompressed_g2(g2_3)
-        .into_affine_unchecked()
-        .unwrap()
-        .prepare();
-    let g2_4 = read_uncompressed_g2(g2_4)
-        .into_affine_unchecked()
-        .unwrap()
-        .prepare();
-    let g2_5 = read_uncompressed_g2(g2_5)
-        .into_affine_unchecked()
-        .unwrap()
-        .prepare();
-    let result_miller_loop = bls12_381::Bls12::miller_loop(
-        [
-            (&g1_1, &g2_1),
-            (&g1_2, &g2_2),
-            (&g1_3, &g2_3),
-            (&g1_4, &g2_4),
-            (&g1_5, &g2_5),
-        ]
-        .iter(),
-    );
-    write_fq12(buffer, result_miller_loop)
+    let g1_1 = bls12_381::G1Affine::from_uncompressed_unchecked(g1_1).unwrap();
+    let g1_2 = bls12_381::G1Affine::from_uncompressed_unchecked(g1_2).unwrap();
+    let g1_3 = bls12_381::G1Affine::from_uncompressed_unchecked(g1_3).unwrap();
+    let g1_4 = bls12_381::G1Affine::from_uncompressed_unchecked(g1_4).unwrap();
+    let g1_5 = bls12_381::G1Affine::from_uncompressed_unchecked(g1_5).unwrap();
+    let g2_1 = bls12_381::G2Affine::from_uncompressed_unchecked(g2_1).unwrap();
+    let g2_1 = bls12_381::G2Prepared::from(g2_1);
+    let g2_2 = bls12_381::G2Affine::from_uncompressed_unchecked(g2_2).unwrap();
+    let g2_2 = bls12_381::G2Prepared::from(g2_2);
+    let g2_3 = bls12_381::G2Affine::from_uncompressed_unchecked(g2_3).unwrap();
+    let g2_3 = bls12_381::G2Prepared::from(g2_3);
+    let g2_4 = bls12_381::G2Affine::from_uncompressed_unchecked(g2_4).unwrap();
+    let g2_4 = bls12_381::G2Prepared::from(g2_4);
+    let g2_5 = bls12_381::G2Affine::from_uncompressed_unchecked(g2_5).unwrap();
+    let g2_5 = bls12_381::G2Prepared::from(g2_5);
+    let res = multi_miller_loop(&[
+        (&g1_1, &g2_1),
+        (&g1_2, &g2_2),
+        (&g1_3, &g2_3),
+        (&g1_4, &g2_4),
+        (&g1_5, &g2_5),
+    ])
+    .final_exponentiation();
+    res == bls12_381::Gt::identity()
 }
 
 #[cfg_attr(not(feature = "wasm"), no_mangle)]
 #[cfg_attr(feature = "wasm", wasm_bindgen)]
-pub extern "C" fn rustc_bls12_381_pairing_miller_loop_6(
-    buffer: *mut [c_uchar; LENGTH_FQ12_BYTES],
+pub extern "C" fn rustc_bls12_381_pairing_check_6(
     g1_1: *const [c_uchar; LENGTH_UNCOMPRESSED_G1_BYTES],
     g1_2: *const [c_uchar; LENGTH_UNCOMPRESSED_G1_BYTES],
     g1_3: *const [c_uchar; LENGTH_UNCOMPRESSED_G1_BYTES],
@@ -276,7 +185,7 @@ pub extern "C" fn rustc_bls12_381_pairing_miller_loop_6(
     g2_4: *const [c_uchar; LENGTH_UNCOMPRESSED_G2_BYTES],
     g2_5: *const [c_uchar; LENGTH_UNCOMPRESSED_G2_BYTES],
     g2_6: *const [c_uchar; LENGTH_UNCOMPRESSED_G2_BYTES],
-) {
+) -> bool {
     let g1_1 = unsafe { &*g1_1 };
     let g1_2 = unsafe { &*g1_2 };
     let g1_3 = unsafe { &*g1_3 };
@@ -289,91 +198,32 @@ pub extern "C" fn rustc_bls12_381_pairing_miller_loop_6(
     let g2_4 = unsafe { &*g2_4 };
     let g2_5 = unsafe { &*g2_5 };
     let g2_6 = unsafe { &*g2_6 };
-    let g1_1 = read_uncompressed_g1(g1_1)
-        .into_affine_unchecked()
-        .unwrap()
-        .prepare();
-    let g1_2 = read_uncompressed_g1(g1_2)
-        .into_affine_unchecked()
-        .unwrap()
-        .prepare();
-    let g1_3 = read_uncompressed_g1(g1_3)
-        .into_affine_unchecked()
-        .unwrap()
-        .prepare();
-    let g1_4 = read_uncompressed_g1(g1_4)
-        .into_affine_unchecked()
-        .unwrap()
-        .prepare();
-    let g1_5 = read_uncompressed_g1(g1_5)
-        .into_affine_unchecked()
-        .unwrap()
-        .prepare();
-    let g1_6 = read_uncompressed_g1(g1_6)
-        .into_affine_unchecked()
-        .unwrap()
-        .prepare();
-    let g2_1 = read_uncompressed_g2(g2_1)
-        .into_affine_unchecked()
-        .unwrap()
-        .prepare();
-    let g2_2 = read_uncompressed_g2(g2_2)
-        .into_affine_unchecked()
-        .unwrap()
-        .prepare();
-    let g2_3 = read_uncompressed_g2(g2_3)
-        .into_affine_unchecked()
-        .unwrap()
-        .prepare();
-    let g2_4 = read_uncompressed_g2(g2_4)
-        .into_affine_unchecked()
-        .unwrap()
-        .prepare();
-    let g2_5 = read_uncompressed_g2(g2_5)
-        .into_affine_unchecked()
-        .unwrap()
-        .prepare();
-    let g2_6 = read_uncompressed_g2(g2_6)
-        .into_affine_unchecked()
-        .unwrap()
-        .prepare();
-    let result_miller_loop = bls12_381::Bls12::miller_loop(
-        [
-            (&g1_1, &g2_1),
-            (&g1_2, &g2_2),
-            (&g1_3, &g2_3),
-            (&g1_4, &g2_4),
-            (&g1_5, &g2_5),
-            (&g1_6, &g2_6),
-        ]
-        .iter(),
-    );
-    write_fq12(buffer, result_miller_loop)
-}
-
-#[cfg_attr(not(feature = "wasm"), no_mangle)]
-#[cfg_attr(feature = "wasm", wasm_bindgen)]
-pub extern "C" fn rustc_bls12_381_pairing(
-    buffer: *mut [c_uchar; LENGTH_FQ12_BYTES],
-    g1: *const [c_uchar; LENGTH_UNCOMPRESSED_G1_BYTES],
-    g2: *const [c_uchar; LENGTH_UNCOMPRESSED_G2_BYTES],
-) {
-    let g1 = unsafe { &*g1 };
-    let g2 = unsafe { &*g2 };
-    let g1 = read_uncompressed_g1(g1).into_affine_unchecked().unwrap();
-    let g2 = read_uncompressed_g2(g2).into_affine_unchecked().unwrap();
-    let result_pairing = bls12_381::Bls12::pairing(g1, g2);
-    write_fq12(buffer, result_pairing)
-}
-
-// Do not check if x is null, hence unsafe
-#[cfg_attr(not(feature = "wasm"), no_mangle)]
-#[cfg_attr(feature = "wasm", wasm_bindgen)]
-pub extern "C" fn rustc_bls12_381_unsafe_pairing_final_exponentiation(
-    buffer: *mut [c_uchar; LENGTH_FQ12_BYTES],
-    x: *const [c_uchar; LENGTH_FQ12_BYTES],
-) {
-    let x = read_fq12(unsafe { &*x }).unwrap();
-    let x = bls12_381::Bls12::final_exponentiation(&x).unwrap();
-    write_fq12(buffer, x);
+    let g1_1 = bls12_381::G1Affine::from_uncompressed_unchecked(g1_1).unwrap();
+    let g1_2 = bls12_381::G1Affine::from_uncompressed_unchecked(g1_2).unwrap();
+    let g1_3 = bls12_381::G1Affine::from_uncompressed_unchecked(g1_3).unwrap();
+    let g1_4 = bls12_381::G1Affine::from_uncompressed_unchecked(g1_4).unwrap();
+    let g1_5 = bls12_381::G1Affine::from_uncompressed_unchecked(g1_5).unwrap();
+    let g1_6 = bls12_381::G1Affine::from_uncompressed_unchecked(g1_6).unwrap();
+    let g2_1 = bls12_381::G2Affine::from_uncompressed_unchecked(g2_1).unwrap();
+    let g2_1 = bls12_381::G2Prepared::from(g2_1);
+    let g2_2 = bls12_381::G2Affine::from_uncompressed_unchecked(g2_2).unwrap();
+    let g2_2 = bls12_381::G2Prepared::from(g2_2);
+    let g2_3 = bls12_381::G2Affine::from_uncompressed_unchecked(g2_3).unwrap();
+    let g2_3 = bls12_381::G2Prepared::from(g2_3);
+    let g2_4 = bls12_381::G2Affine::from_uncompressed_unchecked(g2_4).unwrap();
+    let g2_4 = bls12_381::G2Prepared::from(g2_4);
+    let g2_5 = bls12_381::G2Affine::from_uncompressed_unchecked(g2_5).unwrap();
+    let g2_5 = bls12_381::G2Prepared::from(g2_5);
+    let g2_6 = bls12_381::G2Affine::from_uncompressed_unchecked(g2_6).unwrap();
+    let g2_6 = bls12_381::G2Prepared::from(g2_6);
+    let res = multi_miller_loop(&[
+        (&g1_1, &g2_1),
+        (&g1_2, &g2_2),
+        (&g1_3, &g2_3),
+        (&g1_4, &g2_4),
+        (&g1_5, &g2_5),
+        (&g1_6, &g2_6),
+    ])
+    .final_exponentiation();
+    res == bls12_381::Gt::identity()
 }
