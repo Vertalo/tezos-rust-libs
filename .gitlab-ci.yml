@@ -4,21 +4,25 @@ install-and-remove:
   parallel:
     matrix:
       - RUST_VERSION: "1.44.0"
-        OCAML_VERSION: "4.09"
+        OCAML_VERSION: "4.10"
       - RUST_VERSION: "1.45.0"
-        OCAML_VERSION: "4.09"
+        OCAML_VERSION: "4.10"
       - RUST_VERSION: "1.46.0"
-        OCAML_VERSION: "4.09"
+        OCAML_VERSION: "4.10"
       - RUST_VERSION: "1.47.0"
-        OCAML_VERSION: "4.09"
+        OCAML_VERSION: "4.10"
       - RUST_VERSION: "1.48.0"
-        OCAML_VERSION: "4.09"
+        OCAML_VERSION: "4.10"
       - RUST_VERSION: "1.49.0"
-        OCAML_VERSION: "4.09"
+        OCAML_VERSION: "4.10"
       - RUST_VERSION: "1.50.0"
-        OCAML_VERSION: "4.09"
-  image: registry.gitlab.com/dannywillems/docker-ocaml-rust:${OCAML_VERSION}-${RUST_VERSION}
+        OCAML_VERSION: "4.10"
+  image: ocaml/opam2:${OCAML_VERSION}
   before_script:
+    - sudo apt-get update
+    - sudo apt-get install m4 -y
+    - eval $(opam env)
+    - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain ${RUST_VERSION}
     - . $HOME/.cargo/env
     - opam --version
     - ocaml --version
