@@ -5,6 +5,18 @@ install-and-remove:
     matrix:
       - RUST_VERSION: "1.44.0"
         OCAML_VERSION: "4.09"
+      - RUST_VERSION: "1.45.0"
+        OCAML_VERSION: "4.09"
+      - RUST_VERSION: "1.46.0"
+        OCAML_VERSION: "4.09"
+      - RUST_VERSION: "1.47.0"
+        OCAML_VERSION: "4.09"
+      - RUST_VERSION: "1.48.0"
+        OCAML_VERSION: "4.09"
+      - RUST_VERSION: "1.49.0"
+        OCAML_VERSION: "4.09"
+      - RUST_VERSION: "1.50.0"
+        OCAML_VERSION: "4.09"
   image: registry.gitlab.com/dannywillems/docker-ocaml-rust:${OCAML_VERSION}-${RUST_VERSION}
   before_script:
     - . $HOME/.cargo/env
