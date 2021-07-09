@@ -11,20 +11,24 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 
 [dependencies]
-ff = "=0.6"
-pairing = "=0.16"
-group = "=0.6.0"
+ff-zeroize = "=0.6.3"
+pairing-plus = "=0.19.0"
 libc = "=0.2"
 # Looks like it is required by ff and pairing
 rand = { version = "=0.7", features = ["wasm-bindgen"] }
 rand_core = "=0.5.1"
 # 0.2.0 fails to build
 getrandom = { version = "=0.1.15", features = ["wasm-bindgen"] }
+sha2 = "0.8.0"
 
 console_error_panic_hook = { version = "0.1.6", optional = true }
 
 wasm-bindgen = { version = "=0.2.67", optional = true }
 wee_alloc = {version = "*", optional = true }
+
+[dependencies.digest]
+version = "0.8"
+features = ["std"]
 
 [features]
 

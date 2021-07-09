@@ -9,11 +9,11 @@ mod tests {
     use super::*;
     use test::Bencher;
 
-    use ff::Field;
-    use group::{CurveAffine, CurveProjective, EncodedPoint};
-    use pairing::bls12_381;
-    use pairing::bls12_381::Fr;
-    use pairing::bls12_381::{G1Compressed, G1Uncompressed};
+    use ff_zeroize::Field;
+    use pairing_plus::{CurveAffine, CurveProjective, EncodedPoint};
+    use pairing_plus::bls12_381;
+    use pairing_plus::bls12_381::Fr;
+    use pairing_plus::bls12_381::{G1Compressed, G1Uncompressed};
 
     fn generate_uncompressed_random_element() -> G1Uncompressed {
         let mut random_gen = rand::thread_rng();

@@ -1,6 +1,6 @@
-use ff::Field;
-use pairing::bls12_381;
-use pairing::bls12_381::Fq12;
+use ff_zeroize::Field;
+use pairing_plus::bls12_381;
+use pairing_plus::bls12_381::Fq12;
 
 use super::reader::read_fq12;
 use super::writer::write_fq12;

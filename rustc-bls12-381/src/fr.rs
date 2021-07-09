@@ -1,6 +1,6 @@
-use ff::Field;
-use pairing::bls12_381;
-use pairing::bls12_381::Fr;
+use ff_zeroize::Field;
+use pairing_plus::bls12_381;
+use pairing_plus::bls12_381::Fr;
 
 use super::reader::read_fr;
 use super::writer::write_fr;

@@ -1,7 +1,7 @@
-use ff::{PrimeField, PrimeFieldDecodingError, PrimeFieldRepr};
-use group::EncodedPoint;
-use pairing::bls12_381::{Fq, Fq12, Fq2, Fq6, Fr};
-use pairing::bls12_381::{G1Compressed, G1Uncompressed, G2Compressed, G2Uncompressed};
+use ff_zeroize::{PrimeField, PrimeFieldDecodingError, PrimeFieldRepr};
+use pairing_plus::bls12_381::{Fq, Fq12, Fq2, Fq6, Fr};
+use pairing_plus::bls12_381::{G1Compressed, G1Uncompressed, G2Compressed, G2Uncompressed};
+use pairing_plus::EncodedPoint;
 
 #[cfg(not(feature = "wasm"))]
 use libc::c_uchar;

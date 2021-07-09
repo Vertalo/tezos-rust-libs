@@ -1,6 +1,6 @@
-use ff::{PrimeField, PrimeFieldRepr};
-use pairing::bls12_381::{Fq12, Fr};
-use pairing::bls12_381::{G1Compressed, G1Uncompressed, G2Compressed, G2Uncompressed};
+use ff_zeroize::{PrimeField, PrimeFieldRepr};
+use pairing_plus::bls12_381::{Fq12, Fr};
+use pairing_plus::bls12_381::{G1Compressed, G1Uncompressed, G2Compressed, G2Uncompressed};
 
 #[cfg(not(feature = "wasm"))]
 use libc::c_uchar;

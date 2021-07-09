@@ -2,10 +2,10 @@ use super::reader::{read_fq12, read_uncompressed_g1, read_uncompressed_g2};
 use super::writer::write_fq12;
 
 use super::{LENGTH_FQ12_BYTES, LENGTH_UNCOMPRESSED_G1_BYTES, LENGTH_UNCOMPRESSED_G2_BYTES};
-use group::EncodedPoint;
-use pairing::bls12_381;
-use pairing::Engine;
-use pairing::PairingCurveAffine;
+use pairing_plus::bls12_381;
+use pairing_plus::CurveAffine;
+use pairing_plus::EncodedPoint;
+use pairing_plus::Engine;
 
 #[cfg(not(feature = "wasm"))]
 use libc::c_uchar;

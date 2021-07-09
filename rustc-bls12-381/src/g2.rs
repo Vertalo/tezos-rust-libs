@@ -1,6 +1,6 @@
-use ff::{PrimeField, PrimeFieldRepr};
-use group::{CurveAffine, CurveProjective, EncodedPoint};
-use pairing::bls12_381;
+use ff_zeroize::{PrimeField, PrimeFieldRepr};
+use pairing_plus::bls12_381;
+use pairing_plus::{CurveAffine, CurveProjective, EncodedPoint};
 
 use super::reader::{read_compressed_g2, read_fq, read_fr, read_uncompressed_g2};
 use super::writer::{write_compressed_g2, write_uncompressed_g2};

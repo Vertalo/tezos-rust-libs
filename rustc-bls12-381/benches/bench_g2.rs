@@ -3,11 +3,11 @@
 extern crate rand;
 extern crate rand_core;
 
-use ff::Field;
-use group::{CurveAffine, CurveProjective, EncodedPoint};
-use pairing::bls12_381;
-use pairing::bls12_381::Fr;
-use pairing::bls12_381::{G2Compressed, G2Uncompressed};
+use ff_zeroize::Field;
+use pairing_plus::{CurveAffine, CurveProjective, EncodedPoint};
+use pairing_plus::bls12_381;
+use pairing_plus::bls12_381::Fr;
+use pairing_plus::bls12_381::{G2Compressed, G2Uncompressed};
 
 extern crate test;
 

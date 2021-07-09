@@ -1,6 +1,9 @@
 #ifndef RUSTC_BLS12_381_INCLUDE_H
 #define RUSTC_BLS12_381_INCLUDE_H
+// for bool
 #include <stdbool.h>
+// for size_t
+#include <stddef.h>
 
 
 // Fq12
@@ -258,5 +261,18 @@ extern void rustc_bls12_381_pairing(unsigned char *buffer,
 
 extern void rustc_bls12_381_unsafe_pairing_final_exponentiation(unsigned char *buffer,
                                                                 const unsigned char *x);
+
+// hash_to_curve
+extern void rustc_bls12_381_hash_to_curve_g1(unsigned char *buffer,
+                                             const unsigned char *message,
+                                             const unsigned char *dst,
+                                             size_t message_length,
+                                             size_t dst_length);
+
+extern void rustc_bls12_381_hash_to_curve_g2(unsigned char *buffer,
+                                             const unsigned char *message,
+                                             const unsigned char *dst,
+                                             size_t message_length,
+                                             size_t dst_length);
 
 #endif

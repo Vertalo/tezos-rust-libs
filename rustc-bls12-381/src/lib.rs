@@ -20,6 +20,7 @@ pub mod fq12;
 pub mod fr;
 pub mod g1;
 pub mod g2;
+pub mod hash_to_curve;
 pub mod pairing;
 mod reader;
 mod writer;

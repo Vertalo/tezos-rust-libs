@@ -42,8 +42,8 @@ Code can be compiled to wasm to be used in the browser using wasm-pack
 ```shell
 wasm-pack build -- --features wasm
 ```
-The default output will be to used with the bundler `webpack`.
-You would also need to get access to the wasm memory of the module. You can add `export { wasm }` because it is not exported by default with the webpack target:
+The default output will be for use with the bundler `webpack`.
+You would also need to get access to the wasm memory of the module. You must export the wasm module because it is not exported by default with the webpack target:
 ```shell
 echo "\nexport { wasm };" >> pkg/rustc_bls12_381.js
 ```
