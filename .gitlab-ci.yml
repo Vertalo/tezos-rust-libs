@@ -8,7 +8,7 @@ install-and-remove:
           - "1.52.0"
           - "1.53.0"
           - stable
-  image: ocaml/opam2:${OCAML_VERSION}
+  image: ocaml/opam:debian-ocaml-${OCAML_VERSION}
   before_script:
     - sudo apt-get update
     - sudo apt-get install m4 -y
