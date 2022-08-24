@@ -21,15 +21,16 @@
 
 use bellman::groth16::{Parameters, PreparedVerifyingKey, Proof};
 use blake2s_simd::Params as Blake2sParams;
-use bls12_381::Bls12;
-use group::{cofactor::CofactorGroup, GroupEncoding};
-use libc::{c_uchar, size_t};
+use ff::{PrimeField, PrimeFieldRepr};
+use lazy_static;
+use libc::{c_char, c_uchar, size_t};
+use pairing::bls12_381::{Bls12, Fr, FrRepr};
 use rand_core::{OsRng, RngCore};
+use std::ffi::CStr;
 use std::fs::File;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::slice;
-use subtle::CtOption;
 
 #[cfg(not(target_os = "windows"))]
 use std::ffi::OsStr;
@@ -43,14 +44,19 @@ use std::os::windows::ffi::OsStringExt;
 
 use zcash_primitives::{
     block::equihash,
-    constants::{CRH_IVK_PERSONALIZATION, PROOF_GENERATION_KEY_GENERATOR, SPENDING_KEY_GENERATOR},
+    constants::CRH_IVK_PERSONALIZATION,
+    jubjub::{
+        edwards,
+        fs::{Fs, FsRepr},
+        FixedGenerators, JubjubEngine, JubjubParams, PrimeOrder, ToUniform, Unknown,
+    },
     merkle_tree::MerklePath,
     note_encryption::sapling_ka_agree,
-    primitives::{Diversifier, Note, PaymentAddress, ProofGenerationKey, Rseed, ViewingKey},
+    primitives::{Diversifier, Note, PaymentAddress, ProofGenerationKey, ViewingKey},
     redjubjub::{self, Signature},
     sapling::{merkle_hash, spend_sig},
     transaction::components::Amount,
-    zip32,
+    zip32, JUBJUB,
 };
 use zcash_proofs::{
     circuit::sapling::TREE_DEPTH as SAPLING_TREE_DEPTH,
@@ -60,10 +66,6 @@ use zcash_proofs::{
 };
 
 use zcash_history::{Entry as MMREntry, NodeData as MMRNodeData, Tree as MMRTree};
-
-mod blake2b;
-mod ed25519;
-mod tracing_ffi;
 
 #[cfg(test)]
 mod tests;
@@ -76,77 +78,142 @@ static mut SAPLING_SPEND_PARAMS: Option<Parameters<Bls12>> = None;
 static mut SAPLING_OUTPUT_PARAMS: Option<Parameters<Bls12>> = None;
 static mut SPROUT_GROTH16_PARAMS_PATH: Option<PathBuf> = None;
 
-/// Converts CtOption<t> into Option<T>
-fn de_ct<T>(ct: CtOption<T>) -> Option<T> {
-    if ct.is_some().into() {
-        Some(ct.unwrap())
-    } else {
-        None
-    }
+/// Reads an FrRepr from a [u8; 32].
+fn read_fr(from: &[u8; 32]) -> FrRepr {
+    let mut f = FrRepr::default();
+    f.read_le(&from[..]).expect("length is 32 bytes");
+    f
+}
+
+/// Reads an FsRepr from a [u8; 32].
+fn read_fs(from: &[u8; 32]) -> FsRepr {
+    let mut f = <<Bls12 as JubjubEngine>::Fs as PrimeField>::Repr::default();
+    f.read_le(&from[..]).expect("length is 32 bytes");
+    f
 }
 
 /// Reads an FsRepr from a [u8; 32]
 /// and multiplies it by the given base.
-fn fixed_scalar_mult(from: &[u8; 32], p_g: &jubjub::SubgroupPoint) -> jubjub::SubgroupPoint {
-    // We only call this with `from` being a valid jubjub::Scalar.
-    let f = jubjub::Scalar::from_bytes(from).unwrap();
+fn fixed_scalar_mult(from: &[u8; 32], p_g: FixedGenerators) -> edwards::Point<Bls12, PrimeOrder> {
+    let f = read_fs(from);
 
-    p_g * f
+    JUBJUB.generator(p_g).mul(f, &JUBJUB)
 }
 
 /// Loads the zk-SNARK parameters into memory and saves paths as necessary.
 /// Only called once.
+#[cfg(not(target_os = "windows"))]
 #[no_mangle]
 pub extern "C" fn librustzcash_init_zksnark_params(
-    #[cfg(not(target_os = "windows"))] spend_path: *const u8,
-    #[cfg(target_os = "windows")] spend_path: *const u16,
+    spend_path: *const u8,
     spend_path_len: usize,
-    #[cfg(not(target_os = "windows"))] output_path: *const u8,
-    #[cfg(target_os = "windows")] output_path: *const u16,
+    spend_hash: *const c_char,
+    output_path: *const u8,
     output_path_len: usize,
-    #[cfg(not(target_os = "windows"))] sprout_path: *const u8,
-    #[cfg(target_os = "windows")] sprout_path: *const u16,
+    output_hash: *const c_char,
+    sprout_path: *const u8,
     sprout_path_len: usize,
+    sprout_hash: *const c_char,
 ) {
-    #[cfg(not(target_os = "windows"))]
-    let (spend_path, output_path, sprout_path) = {
-        (
-            OsStr::from_bytes(unsafe { slice::from_raw_parts(spend_path, spend_path_len) }),
-            OsStr::from_bytes(unsafe { slice::from_raw_parts(output_path, output_path_len) }),
-            if sprout_path.is_null() {
-                None
-            } else {
-                Some(OsStr::from_bytes(unsafe {
-                    slice::from_raw_parts(sprout_path, sprout_path_len)
-                }))
-            },
-        )
+    let spend_path = Path::new(OsStr::from_bytes(unsafe {
+        slice::from_raw_parts(spend_path, spend_path_len)
+    }));
+    let output_path = Path::new(OsStr::from_bytes(unsafe {
+        slice::from_raw_parts(output_path, output_path_len)
+    }));
+    let sprout_path = if sprout_path.is_null() {
+        None
+    } else {
+        Some(Path::new(OsStr::from_bytes(unsafe {
+            slice::from_raw_parts(sprout_path, sprout_path_len)
+        })))
     };
 
-    #[cfg(target_os = "windows")]
-    let (spend_path, output_path, sprout_path) = {
-        (
-            OsString::from_wide(unsafe { slice::from_raw_parts(spend_path, spend_path_len) }),
-            OsString::from_wide(unsafe { slice::from_raw_parts(output_path, output_path_len) }),
-            if sprout_path.is_null() {
-                None
-            } else {
-                Some(OsString::from_wide(unsafe {
-                    slice::from_raw_parts(sprout_path, sprout_path_len)
-                }))
-            },
-        )
+    init_zksnark_params(
+        spend_path,
+        spend_hash,
+        output_path,
+        output_hash,
+        sprout_path,
+        sprout_hash,
+    )
+}
+
+/// Loads the zk-SNARK parameters into memory and saves paths as necessary.
+/// Only called once.
+#[cfg(target_os = "windows")]
+#[no_mangle]
+pub extern "C" fn librustzcash_init_zksnark_params(
+    spend_path: *const u16,
+    spend_path_len: usize,
+    spend_hash: *const c_char,
+    output_path: *const u16,
+    output_path_len: usize,
+    output_hash: *const c_char,
+    sprout_path: *const u16,
+    sprout_path_len: usize,
+    sprout_hash: *const c_char,
+) {
+    let spend_path =
+        OsString::from_wide(unsafe { slice::from_raw_parts(spend_path, spend_path_len) });
+    let output_path =
+        OsString::from_wide(unsafe { slice::from_raw_parts(output_path, output_path_len) });
+    let sprout_path = if sprout_path.is_null() {
+        None
+    } else {
+        Some(OsString::from_wide(unsafe {
+            slice::from_raw_parts(sprout_path, sprout_path_len)
+        }))
     };
 
-    let (spend_path, output_path, sprout_path) = (
+    init_zksnark_params(
         Path::new(&spend_path),
+        spend_hash,
         Path::new(&output_path),
+        output_hash,
         sprout_path.as_ref().map(|p| Path::new(p)),
-    );
+        sprout_hash,
+    )
+}
+
+fn init_zksnark_params(
+    spend_path: &Path,
+    spend_hash: *const c_char,
+    output_path: &Path,
+    output_hash: *const c_char,
+    sprout_path: Option<&Path>,
+    sprout_hash: *const c_char,
+) {
+    // Initialize jubjub parameters here
+    lazy_static::initialize(&JUBJUB);
+
+    let spend_hash = unsafe { CStr::from_ptr(spend_hash) }
+        .to_str()
+        .expect("hash should be a valid string");
+
+    let output_hash = unsafe { CStr::from_ptr(output_hash) }
+        .to_str()
+        .expect("hash should be a valid string");
+
+    let sprout_hash = if sprout_path.is_none() {
+        None
+    } else {
+        Some(
+            unsafe { CStr::from_ptr(sprout_hash) }
+                .to_str()
+                .expect("hash should be a valid string"),
+        )
+    };
 
     // Load params
-    let (spend_params, spend_vk, output_params, output_vk, sprout_vk) =
-        load_parameters(spend_path, output_path, sprout_path);
+    let (spend_params, spend_vk, output_params, output_vk, sprout_vk) = load_parameters(
+        spend_path,
+        spend_hash,
+        output_path,
+        output_hash,
+        sprout_path,
+        sprout_hash,
+    );
 
     // Caller is responsible for calling this function once, so
     // these global mutations are safe.
@@ -166,12 +233,12 @@ pub extern "C" fn librustzcash_init_zksnark_params(
 /// `result` must be a valid pointer to 32 bytes which will be written.
 #[no_mangle]
 pub extern "C" fn librustzcash_tree_uncommitted(result: *mut [c_uchar; 32]) {
-    let tmp = Note::uncommitted().to_bytes();
+    let tmp = Note::<Bls12>::uncommitted().into_repr();
 
     // Should be okay, caller is responsible for ensuring the pointer
     // is a valid pointer to 32 bytes that can be mutated.
     let result = unsafe { &mut *result };
-    *result = tmp;
+    tmp.write_le(&mut result[..]).expect("length is 32 bytes");
 }
 
 /// Computes a merkle tree hash for a given depth. The `depth` parameter should
@@ -189,13 +256,21 @@ pub extern "C" fn librustzcash_merkle_hash(
     result: *mut [c_uchar; 32],
 ) {
     // Should be okay, because caller is responsible for ensuring
-    // the pointers are valid pointers to 32 bytes.
-    let tmp = merkle_hash(depth, unsafe { &*a }, unsafe { &*b });
+    // the pointer is a valid pointer to 32 bytes, and that is the
+    // size of the representation
+    let a_repr = read_fr(unsafe { &*a });
+
+    // Should be okay, because caller is responsible for ensuring
+    // the pointer is a valid pointer to 32 bytes, and that is the
+    // size of the representation
+    let b_repr = read_fr(unsafe { &*b });
+
+    let tmp = merkle_hash(depth, &a_repr, &b_repr);
 
     // Should be okay, caller is responsible for ensuring the pointer
     // is a valid pointer to 32 bytes that can be mutated.
     let result = unsafe { &mut *result };
-    *result = tmp;
+    tmp.write_le(&mut result[..]).expect("length is 32 bytes");
 }
 
 #[no_mangle] // ToScalar
@@ -203,31 +278,33 @@ pub extern "C" fn librustzcash_to_scalar(input: *const [c_uchar; 64], result: *m
     // Should be okay, because caller is responsible for ensuring
     // the pointer is a valid pointer to 32 bytes, and that is the
     // size of the representation
-    let scalar = jubjub::Scalar::from_bytes_wide(unsafe { &*input });
+    let scalar = <Bls12 as JubjubEngine>::Fs::to_uniform(unsafe { &(&*input)[..] }).into_repr();
 
     let result = unsafe { &mut *result };
 
-    *result = scalar.to_bytes();
+    scalar
+        .write_le(&mut result[..])
+        .expect("length is 32 bytes");
 }
 
 #[no_mangle]
 pub extern "C" fn librustzcash_ask_to_ak(ask: *const [c_uchar; 32], result: *mut [c_uchar; 32]) {
     let ask = unsafe { &*ask };
-    let ak = fixed_scalar_mult(ask, &SPENDING_KEY_GENERATOR);
+    let ak = fixed_scalar_mult(ask, FixedGenerators::SpendingKeyGenerator);
 
     let result = unsafe { &mut *result };
 
-    *result = ak.to_bytes();
+    ak.write(&mut result[..]).expect("length is 32 bytes");
 }
 
 #[no_mangle]
 pub extern "C" fn librustzcash_nsk_to_nk(nsk: *const [c_uchar; 32], result: *mut [c_uchar; 32]) {
     let nsk = unsafe { &*nsk };
-    let nk = fixed_scalar_mult(nsk, &PROOF_GENERATION_KEY_GENERATOR);
+    let nk = fixed_scalar_mult(nsk, FixedGenerators::ProofGenerationKey);
 
     let result = unsafe { &mut *result };
 
-    *result = nk.to_bytes();
+    nk.write(&mut result[..]).expect("length is 32 bytes");
 }
 
 #[no_mangle]
@@ -258,7 +335,7 @@ pub extern "C" fn librustzcash_crh_ivk(
 #[no_mangle]
 pub extern "C" fn librustzcash_check_diversifier(diversifier: *const [c_uchar; 11]) -> bool {
     let diversifier = Diversifier(unsafe { *diversifier });
-    diversifier.g_d().is_some()
+    diversifier.g_d::<Bls12>(&JUBJUB).is_some()
 }
 
 #[no_mangle]
@@ -267,14 +344,14 @@ pub extern "C" fn librustzcash_ivk_to_pkd(
     diversifier: *const [c_uchar; 11],
     result: *mut [c_uchar; 32],
 ) -> bool {
-    let ivk = de_ct(jubjub::Scalar::from_bytes(unsafe { &*ivk }));
+    let ivk = read_fs(unsafe { &*ivk });
     let diversifier = Diversifier(unsafe { *diversifier });
-    if let (Some(ivk), Some(g_d)) = (ivk, diversifier.g_d()) {
-        let pk_d = g_d * ivk;
+    if let Some(g_d) = diversifier.g_d::<Bls12>(&JUBJUB) {
+        let pk_d = g_d.mul(ivk, &JUBJUB);
 
         let result = unsafe { &mut *result };
 
-        *result = pk_d.to_bytes();
+        pk_d.write(&mut result[..]).expect("length is 32 bytes");
 
         true
     } else {
@@ -294,8 +371,11 @@ fn test_gen_r() {
     assert_ne!(r1, r2);
 
     // Verify r values are valid in the field
-    let _ = jubjub::Scalar::from_bytes(&r1).unwrap();
-    let _ = jubjub::Scalar::from_bytes(&r2).unwrap();
+    let mut repr = FsRepr::default();
+    repr.read_le(&r1[..]).expect("length is not 32 bytes");
+    let _ = Fs::from_repr(repr).unwrap();
+    repr.read_le(&r2[..]).expect("length is not 32 bytes");
+    let _ = Fs::from_repr(repr).unwrap();
 }
 
 /// Generate uniformly random scalar in Jubjub. The result is of length 32.
@@ -307,9 +387,11 @@ pub extern "C" fn librustzcash_sapling_generate_r(result: *mut [c_uchar; 32]) {
     rng.fill_bytes(&mut buffer);
 
     // reduce to uniform value
-    let r = jubjub::Scalar::from_bytes_wide(&buffer);
+    let r = <Bls12 as JubjubEngine>::Fs::to_uniform(&buffer[..]);
     let result = unsafe { &mut *result };
-    *result = r.to_bytes();
+    r.into_repr()
+        .write_le(&mut result[..])
+        .expect("result must be 32 bytes");
 }
 
 // Private utility function to get Note from C parameters
@@ -317,25 +399,24 @@ fn priv_get_note(
     diversifier: *const [c_uchar; 11],
     pk_d: *const [c_uchar; 32],
     value: u64,
-    rcm: *const [c_uchar; 32],
-) -> Result<Note, ()> {
+    r: *const [c_uchar; 32],
+) -> Result<Note<Bls12>, ()> {
     let diversifier = Diversifier(unsafe { *diversifier });
-    let g_d = diversifier.g_d().ok_or(())?;
+    let g_d = diversifier.g_d::<Bls12>(&JUBJUB).ok_or(())?;
 
-    let pk_d = de_ct(jubjub::ExtendedPoint::from_bytes(unsafe { &*pk_d })).ok_or(())?;
+    let pk_d = edwards::Point::<Bls12, Unknown>::read(&(unsafe { &*pk_d })[..], &JUBJUB)
+        .map_err(|_| ())?;
 
-    let pk_d = de_ct(pk_d.into_subgroup()).ok_or(())?;
+    let pk_d = pk_d.as_prime_order(&JUBJUB).ok_or(())?;
 
     // Deserialize randomness
-    // If this is after ZIP 212, the caller has calculated rcm, and we don't need to call
-    // Note::derive_esk, so we just pretend the note was using this rcm all along.
-    let rseed = Rseed::BeforeZip212(de_ct(jubjub::Scalar::from_bytes(unsafe { &*rcm })).ok_or(())?);
+    let r = Fs::from_repr(read_fs(unsafe { &*r })).map_err(|_| ())?;
 
     let note = Note {
         value,
         g_d,
         pk_d,
-        rseed,
+        r,
     };
 
     Ok(note)
@@ -352,39 +433,39 @@ pub extern "C" fn librustzcash_sapling_compute_nf(
     diversifier: *const [c_uchar; 11],
     pk_d: *const [c_uchar; 32],
     value: u64,
-    rcm: *const [c_uchar; 32],
+    r: *const [c_uchar; 32],
     ak: *const [c_uchar; 32],
     nk: *const [c_uchar; 32],
     position: u64,
     result: *mut [c_uchar; 32],
 ) -> bool {
-    let note = match priv_get_note(diversifier, pk_d, value, rcm) {
+    let note = match priv_get_note(diversifier, pk_d, value, r) {
         Ok(p) => p,
         Err(_) => return false,
     };
 
-    let ak = match de_ct(jubjub::ExtendedPoint::from_bytes(unsafe { &*ak })) {
-        Some(p) => p,
-        None => return false,
+    let ak = match edwards::Point::<Bls12, Unknown>::read(&(unsafe { &*ak })[..], &JUBJUB) {
+        Ok(p) => p,
+        Err(_) => return false,
     };
 
-    let ak = match de_ct(ak.into_subgroup()) {
+    let ak = match ak.as_prime_order(&JUBJUB) {
         Some(ak) => ak,
         None => return false,
     };
 
-    let nk = match de_ct(jubjub::ExtendedPoint::from_bytes(unsafe { &*nk })) {
-        Some(p) => p,
-        None => return false,
+    let nk = match edwards::Point::<Bls12, Unknown>::read(&(unsafe { &*nk })[..], &JUBJUB) {
+        Ok(p) => p,
+        Err(_) => return false,
     };
 
-    let nk = match de_ct(nk.into_subgroup()) {
+    let nk = match nk.as_prime_order(&JUBJUB) {
         Some(nk) => nk,
         None => return false,
     };
 
     let vk = ViewingKey { ak, nk };
-    let nf = note.nf(&vk, position);
+    let nf = note.nf(&vk, position, &JUBJUB);
     let result = unsafe { &mut *result };
     result.copy_from_slice(&nf);
 
@@ -398,20 +479,23 @@ pub extern "C" fn librustzcash_sapling_compute_nf(
 /// The result is also of length 32 and placed in `result`.
 /// Returns false if `diversifier` or `pk_d` is not valid.
 #[no_mangle]
-pub extern "C" fn librustzcash_sapling_compute_cmu(
+pub extern "C" fn librustzcash_sapling_compute_cm(
     diversifier: *const [c_uchar; 11],
     pk_d: *const [c_uchar; 32],
     value: u64,
-    rcm: *const [c_uchar; 32],
+    r: *const [c_uchar; 32],
     result: *mut [c_uchar; 32],
 ) -> bool {
-    let note = match priv_get_note(diversifier, pk_d, value, rcm) {
+    let note = match priv_get_note(diversifier, pk_d, value, r) {
         Ok(p) => p,
         Err(_) => return false,
     };
 
     let result = unsafe { &mut *result };
-    *result = note.cmu().to_bytes();
+    note.cm(&JUBJUB)
+        .into_repr()
+        .write_le(&mut result[..])
+        .expect("length is 32 bytes");
 
     true
 }
@@ -427,15 +511,15 @@ pub extern "C" fn librustzcash_sapling_ka_agree(
     result: *mut [c_uchar; 32],
 ) -> bool {
     // Deserialize p
-    let p = match de_ct(jubjub::ExtendedPoint::from_bytes(unsafe { &*p })) {
-        Some(p) => p,
-        None => return false,
+    let p = match edwards::Point::<Bls12, Unknown>::read(&(unsafe { &*p })[..], &JUBJUB) {
+        Ok(p) => p,
+        Err(_) => return false,
     };
 
     // Deserialize sk
-    let sk = match de_ct(jubjub::Scalar::from_bytes(unsafe { &*sk })) {
-        Some(p) => p,
-        None => return false,
+    let sk = match Fs::from_repr(read_fs(unsafe { &*sk })) {
+        Ok(p) => p,
+        Err(_) => return false,
     };
 
     // Compute key agreement
@@ -443,7 +527,7 @@ pub extern "C" fn librustzcash_sapling_ka_agree(
 
     // Produce result
     let result = unsafe { &mut *result };
-    *result = ka.to_bytes();
+    ka.write(&mut result[..]).expect("length is not 32 bytes");
 
     true
 }
@@ -460,21 +544,21 @@ pub extern "C" fn librustzcash_sapling_ka_derivepublic(
     let diversifier = Diversifier(unsafe { *diversifier });
 
     // Compute g_d from the diversifier
-    let g_d = match diversifier.g_d() {
+    let g_d = match diversifier.g_d::<Bls12>(&JUBJUB) {
         Some(g) => g,
         None => return false,
     };
 
     // Deserialize esk
-    let esk = match de_ct(jubjub::Scalar::from_bytes(unsafe { &*esk })) {
-        Some(p) => p,
-        None => return false,
+    let esk = match Fs::from_repr(read_fs(unsafe { &*esk })) {
+        Ok(p) => p,
+        Err(_) => return false,
     };
 
-    let p = g_d * esk;
+    let p = g_d.mul(esk, &JUBJUB);
 
     let result = unsafe { &mut *result };
-    *result = p.to_bytes();
+    p.write(&mut result[..]).expect("length is not 32 bytes");
 
     true
 }
@@ -498,7 +582,7 @@ pub extern "C" fn librustzcash_eh_isvalid(
     let rs_input = unsafe { slice::from_raw_parts(input, input_len) };
     let rs_nonce = unsafe { slice::from_raw_parts(nonce, nonce_len) };
     let rs_soln = unsafe { slice::from_raw_parts(soln, soln_len) };
-    equihash::is_valid_solution(n, k, rs_input, rs_nonce, rs_soln).is_ok()
+    equihash::is_valid_solution(n, k, rs_input, rs_nonce, rs_soln)
 }
 
 /// Creates a Sapling verification context. Please free this when you're done.
@@ -534,20 +618,20 @@ pub extern "C" fn librustzcash_sapling_check_spend(
     sighash_value: *const [c_uchar; 32],
 ) -> bool {
     // Deserialize the value commitment
-    let cv = match de_ct(jubjub::ExtendedPoint::from_bytes(unsafe { &*cv })) {
-        Some(p) => p,
-        None => return false,
+    let cv = match edwards::Point::<Bls12, Unknown>::read(&(unsafe { &*cv })[..], &JUBJUB) {
+        Ok(p) => p,
+        Err(_) => return false,
     };
 
     // Deserialize the anchor, which should be an element
     // of Fr.
-    let anchor = match de_ct(bls12_381::Scalar::from_bytes(unsafe { &*anchor })) {
-        Some(a) => a,
-        None => return false,
+    let anchor = match Fr::from_repr(read_fr(unsafe { &*anchor })) {
+        Ok(a) => a,
+        Err(_) => return false,
     };
 
     // Deserialize rk
-    let rk = match redjubjub::PublicKey::read(&(unsafe { &*rk })[..]) {
+    let rk = match redjubjub::PublicKey::<Bls12>::read(&(unsafe { &*rk })[..], &JUBJUB) {
         Ok(p) => p,
         Err(_) => return false,
     };
@@ -559,7 +643,7 @@ pub extern "C" fn librustzcash_sapling_check_spend(
     };
 
     // Deserialize the proof
-    let zkproof = match Proof::read(&(unsafe { &*zkproof })[..]) {
+    let zkproof = match Proof::<Bls12>::read(&(unsafe { &*zkproof })[..]) {
         Ok(p) => p,
         Err(_) => return false,
     };
@@ -573,6 +657,7 @@ pub extern "C" fn librustzcash_sapling_check_spend(
         spend_auth_sig,
         zkproof,
         unsafe { SAPLING_SPEND_VK.as_ref() }.unwrap(),
+        &JUBJUB,
     )
 }
 
@@ -587,26 +672,26 @@ pub extern "C" fn librustzcash_sapling_check_output(
     zkproof: *const [c_uchar; GROTH_PROOF_SIZE],
 ) -> bool {
     // Deserialize the value commitment
-    let cv = match de_ct(jubjub::ExtendedPoint::from_bytes(unsafe { &*cv })) {
-        Some(p) => p,
-        None => return false,
+    let cv = match edwards::Point::<Bls12, Unknown>::read(&(unsafe { &*cv })[..], &JUBJUB) {
+        Ok(p) => p,
+        Err(_) => return false,
     };
 
     // Deserialize the commitment, which should be an element
     // of Fr.
-    let cm = match de_ct(bls12_381::Scalar::from_bytes(unsafe { &*cm })) {
-        Some(a) => a,
-        None => return false,
+    let cm = match Fr::from_repr(read_fr(unsafe { &*cm })) {
+        Ok(a) => a,
+        Err(_) => return false,
     };
 
     // Deserialize the ephemeral key
-    let epk = match de_ct(jubjub::ExtendedPoint::from_bytes(unsafe { &*epk })) {
-        Some(p) => p,
-        None => return false,
+    let epk = match edwards::Point::<Bls12, Unknown>::read(&(unsafe { &*epk })[..], &JUBJUB) {
+        Ok(p) => p,
+        Err(_) => return false,
     };
 
     // Deserialize the proof
-    let zkproof = match Proof::read(&(unsafe { &*zkproof })[..]) {
+    let zkproof = match Proof::<Bls12>::read(&(unsafe { &*zkproof })[..]) {
         Ok(p) => p,
         Err(_) => return false,
     };
@@ -617,6 +702,7 @@ pub extern "C" fn librustzcash_sapling_check_output(
         epk,
         zkproof,
         unsafe { SAPLING_OUTPUT_VK.as_ref() }.unwrap(),
+        &JUBJUB,
     )
 }
 
@@ -640,7 +726,12 @@ pub extern "C" fn librustzcash_sapling_final_check(
         Err(_) => return false,
     };
 
-    unsafe { &*ctx }.final_check(value_balance, unsafe { &*sighash_value }, binding_sig)
+    unsafe { &*ctx }.final_check(
+        value_balance,
+        unsafe { &*sighash_value },
+        binding_sig,
+        &JUBJUB,
+    )
 }
 
 /// Sprout JoinSplit proof generation.
@@ -690,7 +781,7 @@ pub extern "C" fn librustzcash_sprout_prove(
 
     let mut sprout_fs = BufReader::with_capacity(1024 * 1024, sprout_fs);
 
-    let params = Parameters::read(&mut sprout_fs, false)
+    let params = Parameters::<Bls12>::read(&mut sprout_fs, false)
         .expect("couldn't deserialize Sprout JoinSplit parameters file");
 
     drop(sprout_fs);
@@ -769,21 +860,22 @@ pub extern "C" fn librustzcash_sapling_output_proof(
     zkproof: *mut [c_uchar; GROTH_PROOF_SIZE],
 ) -> bool {
     // Grab `esk`, which the caller should have constructed for the DH key exchange.
-    let esk = match de_ct(jubjub::Scalar::from_bytes(unsafe { &*esk })) {
-        Some(p) => p,
-        None => return false,
+    let esk = match Fs::from_repr(read_fs(unsafe { &*esk })) {
+        Ok(p) => p,
+        Err(_) => return false,
     };
 
     // Grab the payment address from the caller
-    let payment_address = match PaymentAddress::from_bytes(unsafe { &*payment_address }) {
-        Some(pa) => pa,
-        None => return false,
-    };
+    let payment_address =
+        match PaymentAddress::<Bls12>::from_bytes(unsafe { &*payment_address }, &JUBJUB) {
+            Some(pa) => pa,
+            None => return false,
+        };
 
     // The caller provides the commitment randomness for the output note
-    let rcm = match de_ct(jubjub::Scalar::from_bytes(unsafe { &*rcm })) {
-        Some(p) => p,
-        None => return false,
+    let rcm = match Fs::from_repr(read_fs(unsafe { &*rcm })) {
+        Ok(p) => p,
+        Err(_) => return false,
     };
 
     // Create proof
@@ -793,6 +885,7 @@ pub extern "C" fn librustzcash_sapling_output_proof(
         rcm,
         value,
         unsafe { SAPLING_OUTPUT_PARAMS.as_ref() }.unwrap(),
+        &JUBJUB,
     );
 
     // Write the proof out to the caller
@@ -801,7 +894,9 @@ pub extern "C" fn librustzcash_sapling_output_proof(
         .expect("should be able to serialize a proof");
 
     // Write the value commitment to the caller
-    *unsafe { &mut *cv } = value_commitment.to_bytes();
+    value_commitment
+        .write(&mut (unsafe { &mut *cv })[..])
+        .expect("should be able to serialize rcv");
 
     true
 }
@@ -819,13 +914,13 @@ pub extern "C" fn librustzcash_sapling_spend_sig(
     result: *mut [c_uchar; 64],
 ) -> bool {
     // The caller provides the re-randomization of `ak`.
-    let ar = match de_ct(jubjub::Scalar::from_bytes(unsafe { &*ar })) {
-        Some(p) => p,
-        None => return false,
+    let ar = match Fs::from_repr(read_fs(unsafe { &*ar })) {
+        Ok(p) => p,
+        Err(_) => return false,
     };
 
     // The caller provides `ask`, the spend authorizing key.
-    let ask = match redjubjub::PrivateKey::read(&(unsafe { &*ask })[..]) {
+    let ask = match redjubjub::PrivateKey::<Bls12>::read(&(unsafe { &*ask })[..]) {
         Ok(p) => p,
         Err(_) => return false,
     };
@@ -834,7 +929,7 @@ pub extern "C" fn librustzcash_sapling_spend_sig(
     let mut rng = OsRng;
 
     // Do the signing
-    let sig = spend_sig(ask, ar, unsafe { &*sighash }, &mut rng);
+    let sig = spend_sig(ask, ar, unsafe { &*sighash }, &mut rng, &JUBJUB);
 
     // Write out the signature
     sig.write(&mut (unsafe { &mut *result })[..])
@@ -860,7 +955,7 @@ pub extern "C" fn librustzcash_sapling_binding_sig(
     };
 
     // Sign
-    let sig = match unsafe { &*ctx }.binding_sig(value_balance, unsafe { &*sighash }) {
+    let sig = match unsafe { &*ctx }.binding_sig(value_balance, unsafe { &*sighash }, &JUBJUB) {
         Ok(s) => s,
         Err(_) => return false,
     };
@@ -891,21 +986,21 @@ pub extern "C" fn librustzcash_sapling_spend_proof(
     zkproof: *mut [c_uchar; GROTH_PROOF_SIZE],
 ) -> bool {
     // Grab `ak` from the caller, which should be a point.
-    let ak = match de_ct(jubjub::ExtendedPoint::from_bytes(unsafe { &*ak })) {
-        Some(p) => p,
-        None => return false,
+    let ak = match edwards::Point::<Bls12, Unknown>::read(&(unsafe { &*ak })[..], &JUBJUB) {
+        Ok(p) => p,
+        Err(_) => return false,
     };
 
     // `ak` should be prime order.
-    let ak = match de_ct(ak.into_subgroup()) {
+    let ak = match ak.as_prime_order(&JUBJUB) {
         Some(p) => p,
         None => return false,
     };
 
     // Grab `nsk` from the caller
-    let nsk = match de_ct(jubjub::Scalar::from_bytes(unsafe { &*nsk })) {
-        Some(p) => p,
-        None => return false,
+    let nsk = match Fs::from_repr(read_fs(unsafe { &*nsk })) {
+        Ok(p) => p,
+        Err(_) => return false,
     };
 
     // Construct the proof generation key
@@ -918,23 +1013,21 @@ pub extern "C" fn librustzcash_sapling_spend_proof(
     let diversifier = Diversifier(unsafe { *diversifier });
 
     // The caller chooses the note randomness
-    // If this is after ZIP 212, the caller has calculated rcm, and we don't need to call
-    // Note::derive_esk, so we just pretend the note was using this rcm all along.
-    let rseed = match de_ct(jubjub::Scalar::from_bytes(unsafe { &*rcm })) {
-        Some(p) => Rseed::BeforeZip212(p),
-        None => return false,
+    let rcm = match Fs::from_repr(read_fs(unsafe { &*rcm })) {
+        Ok(p) => p,
+        Err(_) => return false,
     };
 
     // The caller also chooses the re-randomization of ak
-    let ar = match de_ct(jubjub::Scalar::from_bytes(unsafe { &*ar })) {
-        Some(p) => p,
-        None => return false,
+    let ar = match Fs::from_repr(read_fs(unsafe { &*ar })) {
+        Ok(p) => p,
+        Err(_) => return false,
     };
 
     // We need to compute the anchor of the Spend.
-    let anchor = match de_ct(bls12_381::Scalar::from_bytes(unsafe { &*anchor })) {
-        Some(p) => p,
-        None => return false,
+    let anchor = match Fr::from_repr(read_fr(unsafe { &*anchor })) {
+        Ok(p) => p,
+        Err(_) => return false,
     };
 
     // Parse the Merkle path from the caller
@@ -948,18 +1041,21 @@ pub extern "C" fn librustzcash_sapling_spend_proof(
         .spend_proof(
             proof_generation_key,
             diversifier,
-            rseed,
+            rcm,
             ar,
             value,
             anchor,
             merkle_path,
             unsafe { SAPLING_SPEND_PARAMS.as_ref() }.unwrap(),
             unsafe { SAPLING_SPEND_VK.as_ref() }.unwrap(),
+            &JUBJUB,
         )
         .expect("proving should not fail");
 
     // Write value commitment to caller
-    *unsafe { &mut *cv } = value_commitment.to_bytes();
+    value_commitment
+        .write(&mut unsafe { &mut *cv }[..])
+        .expect("should be able to serialize cv");
 
     // Write proof out to caller
     proof
@@ -1243,10 +1339,4 @@ pub extern "system" fn librustzcash_mmr_hash_node(
     }
 
     0
-}
-
-#[no_mangle]
-pub extern "C" fn librustzcash_getrandom(buf: *mut u8, buf_len: usize) {
-    let buf = unsafe { slice::from_raw_parts_mut(buf, buf_len) };
-    OsRng.fill_bytes(buf);
 }

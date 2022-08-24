@@ -1,15 +1,6 @@
 lib: [
-  # Sapling
-  ## Headers
   "librustzcash/include/librustzcash.h"
-  "librustzcash/include/rust/blake2b.h" { "rust/blake2b.h" }
-  "librustzcash/include/rust/ed25519.h" { "rust/ed25519.h" }
-  "librustzcash/include/rust/types.h" { "rust/types.h" }
-  ## Static library
   "target/release/librustzcash.a"
-  # BLS12-381
-  ## Headers
   "rustc-bls12-381/include/rustc_bls12_381.h"
-  ## Static library
   "target/release/librustc_bls12_381.a"
 ]
