@@ -3,7 +3,7 @@ variables:
 install-and-remove:
   parallel:
     matrix:
-      - OCAML_VERSION: "4.10"
+      - OCAML_VERSION: "4.14"
         RUST_VERSION:
           - "1.44.0"
           - "1.45.0"
@@ -12,8 +12,9 @@ install-and-remove:
           - "1.48.0"
           - "1.49.0"
           - "1.50.0"
+          - "1.52.1"
           - stable
-  image: ocaml/opam2:${OCAML_VERSION}
+  image: ocaml/opam:debian-11-ocaml-${OCAML_VERSION}
   before_script:
     - sudo apt-get update
     - sudo apt-get install m4 -y
