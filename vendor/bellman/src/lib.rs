@@ -22,14 +22,12 @@
 //!     },
 //!     groth16, Circuit, ConstraintSystem, SynthesisError,
 //! };
-//! use bls12_381::Bls12;
-//! use ff::PrimeField;
-//! use pairing::Engine;
+//! use pairing::{bls12_381::Bls12, Engine};
 //! use rand::rngs::OsRng;
 //! use sha2::{Digest, Sha256};
 //!
 //! /// Our own SHA-256d gadget. Input and output are in little-endian bit order.
-//! fn sha256d<Scalar: PrimeField, CS: ConstraintSystem<Scalar>>(
+//! fn sha256d<E: Engine, CS: ConstraintSystem<E>>(
 //!     mut cs: CS,
 //!     data: &[Boolean],
 //! ) -> Result<Vec<Boolean>, SynthesisError> {
@@ -59,8 +57,8 @@
 //!     preimage: Option<[u8; 80]>,
 //! }
 //!
-//! impl<Scalar: PrimeField> Circuit<Scalar> for MyCircuit {
-//!     fn synthesize<CS: ConstraintSystem<Scalar>>(self, cs: &mut CS) -> Result<(), SynthesisError> {
+//! impl<E: Engine> Circuit<E> for MyCircuit {
+//!     fn synthesize<CS: ConstraintSystem<E>>(self, cs: &mut CS) -> Result<(), SynthesisError> {
 //!         // Compute the values for the bits of the preimage. If we are verifying a proof,
 //!         // we still need to create the same constraints, so we return an equivalent-size
 //!         // Vec of None (indicating that the value of each bit is unknown).
@@ -120,10 +118,10 @@
 //!
 //! // Pack the hash as inputs for proof verification.
 //! let hash_bits = multipack::bytes_to_bits_le(&hash);
-//! let inputs = multipack::compute_multipacking(&hash_bits);
+//! let inputs = multipack::compute_multipacking::<Bls12>(&hash_bits);
 //!
 //! // Check the proof!
-//! assert!(groth16::verify_proof(&pvk, &proof, &inputs).is_ok());
+//! assert!(groth16::verify_proof(&pvk, &proof, &inputs).unwrap());
 //! ```
 //!
 //! # Roadmap
@@ -142,9 +140,9 @@ pub mod gadgets;
 #[cfg(feature = "groth16")]
 pub mod groth16;
 pub mod multicore;
-pub mod multiexp;
+mod multiexp;
 
-use ff::PrimeField;
+use ff::{Field, ScalarEngine};
 
 use std::error::Error;
 use std::fmt;
@@ -156,9 +154,9 @@ use std::ops::{Add, Sub};
 /// rank-1 quadratic constraint systems. The `Circuit` trait represents a
 /// circuit that can be synthesized. The `synthesize` method is called during
 /// CRS generation and during proving.
-pub trait Circuit<Scalar: PrimeField> {
+pub trait Circuit<E: ScalarEngine> {
     /// Synthesize the circuit into a rank-1 quadratic constraint system
-    fn synthesize<CS: ConstraintSystem<Scalar>>(self, cs: &mut CS) -> Result<(), SynthesisError>;
+    fn synthesize<CS: ConstraintSystem<E>>(self, cs: &mut CS) -> Result<(), SynthesisError>;
 }
 
 /// Represents a variable in our constraint system.
@@ -190,59 +188,61 @@ pub enum Index {
 /// This represents a linear combination of some variables, with coefficients
 /// in the scalar field of a pairing-friendly elliptic curve group.
 #[derive(Clone)]
-pub struct LinearCombination<Scalar: PrimeField>(Vec<(Variable, Scalar)>);
+pub struct LinearCombination<E: ScalarEngine>(Vec<(Variable, E::Fr)>);
 
-impl<Scalar: PrimeField> AsRef<[(Variable, Scalar)]> for LinearCombination<Scalar> {
-    fn as_ref(&self) -> &[(Variable, Scalar)] {
+impl<E: ScalarEngine> AsRef<[(Variable, E::Fr)]> for LinearCombination<E> {
+    fn as_ref(&self) -> &[(Variable, E::Fr)] {
         &self.0
     }
 }
 
-impl<Scalar: PrimeField> LinearCombination<Scalar> {
-    pub fn zero() -> LinearCombination<Scalar> {
+impl<E: ScalarEngine> LinearCombination<E> {
+    pub fn zero() -> LinearCombination<E> {
         LinearCombination(vec![])
     }
 }
 
-impl<Scalar: PrimeField> Add<(Scalar, Variable)> for LinearCombination<Scalar> {
-    type Output = LinearCombination<Scalar>;
+impl<E: ScalarEngine> Add<(E::Fr, Variable)> for LinearCombination<E> {
+    type Output = LinearCombination<E>;
 
-    fn add(mut self, (coeff, var): (Scalar, Variable)) -> LinearCombination<Scalar> {
+    fn add(mut self, (coeff, var): (E::Fr, Variable)) -> LinearCombination<E> {
         self.0.push((var, coeff));
 
         self
     }
 }
 
-impl<Scalar: PrimeField> Sub<(Scalar, Variable)> for LinearCombination<Scalar> {
-    type Output = LinearCombination<Scalar>;
+impl<E: ScalarEngine> Sub<(E::Fr, Variable)> for LinearCombination<E> {
+    type Output = LinearCombination<E>;
 
     #[allow(clippy::suspicious_arithmetic_impl)]
-    fn sub(self, (coeff, var): (Scalar, Variable)) -> LinearCombination<Scalar> {
-        self + (coeff.neg(), var)
+    fn sub(self, (mut coeff, var): (E::Fr, Variable)) -> LinearCombination<E> {
+        coeff.negate();
+
+        self + (coeff, var)
     }
 }
 
-impl<Scalar: PrimeField> Add<Variable> for LinearCombination<Scalar> {
-    type Output = LinearCombination<Scalar>;
+impl<E: ScalarEngine> Add<Variable> for LinearCombination<E> {
+    type Output = LinearCombination<E>;
 
-    fn add(self, other: Variable) -> LinearCombination<Scalar> {
-        self + (Scalar::one(), other)
+    fn add(self, other: Variable) -> LinearCombination<E> {
+        self + (E::Fr::one(), other)
     }
 }
 
-impl<Scalar: PrimeField> Sub<Variable> for LinearCombination<Scalar> {
-    type Output = LinearCombination<Scalar>;
+impl<E: ScalarEngine> Sub<Variable> for LinearCombination<E> {
+    type Output = LinearCombination<E>;
 
-    fn sub(self, other: Variable) -> LinearCombination<Scalar> {
-        self - (Scalar::one(), other)
+    fn sub(self, other: Variable) -> LinearCombination<E> {
+        self - (E::Fr::one(), other)
     }
 }
 
-impl<'a, Scalar: PrimeField> Add<&'a LinearCombination<Scalar>> for LinearCombination<Scalar> {
-    type Output = LinearCombination<Scalar>;
+impl<'a, E: ScalarEngine> Add<&'a LinearCombination<E>> for LinearCombination<E> {
+    type Output = LinearCombination<E>;
 
-    fn add(mut self, other: &'a LinearCombination<Scalar>) -> LinearCombination<Scalar> {
+    fn add(mut self, other: &'a LinearCombination<E>) -> LinearCombination<E> {
         for s in &other.0 {
             self = self + (s.1, s.0);
         }
@@ -251,10 +251,10 @@ impl<'a, Scalar: PrimeField> Add<&'a LinearCombination<Scalar>> for LinearCombin
     }
 }
 
-impl<'a, Scalar: PrimeField> Sub<&'a LinearCombination<Scalar>> for LinearCombination<Scalar> {
-    type Output = LinearCombination<Scalar>;
+impl<'a, E: ScalarEngine> Sub<&'a LinearCombination<E>> for LinearCombination<E> {
+    type Output = LinearCombination<E>;
 
-    fn sub(mut self, other: &'a LinearCombination<Scalar>) -> LinearCombination<Scalar> {
+    fn sub(mut self, other: &'a LinearCombination<E>) -> LinearCombination<E> {
         for s in &other.0 {
             self = self - (s.1, s.0);
         }
@@ -263,15 +263,10 @@ impl<'a, Scalar: PrimeField> Sub<&'a LinearCombination<Scalar>> for LinearCombin
     }
 }
 
-impl<'a, Scalar: PrimeField> Add<(Scalar, &'a LinearCombination<Scalar>)>
-    for LinearCombination<Scalar>
-{
-    type Output = LinearCombination<Scalar>;
+impl<'a, E: ScalarEngine> Add<(E::Fr, &'a LinearCombination<E>)> for LinearCombination<E> {
+    type Output = LinearCombination<E>;
 
-    fn add(
-        mut self,
-        (coeff, other): (Scalar, &'a LinearCombination<Scalar>),
-    ) -> LinearCombination<Scalar> {
+    fn add(mut self, (coeff, other): (E::Fr, &'a LinearCombination<E>)) -> LinearCombination<E> {
         for s in &other.0 {
             let mut tmp = s.1;
             tmp.mul_assign(&coeff);
@@ -282,15 +277,10 @@ impl<'a, Scalar: PrimeField> Add<(Scalar, &'a LinearCombination<Scalar>)>
     }
 }
 
-impl<'a, Scalar: PrimeField> Sub<(Scalar, &'a LinearCombination<Scalar>)>
-    for LinearCombination<Scalar>
-{
-    type Output = LinearCombination<Scalar>;
+impl<'a, E: ScalarEngine> Sub<(E::Fr, &'a LinearCombination<E>)> for LinearCombination<E> {
+    type Output = LinearCombination<E>;
 
-    fn sub(
-        mut self,
-        (coeff, other): (Scalar, &'a LinearCombination<Scalar>),
-    ) -> LinearCombination<Scalar> {
+    fn sub(mut self, (coeff, other): (E::Fr, &'a LinearCombination<E>)) -> LinearCombination<E> {
         for s in &other.0 {
             let mut tmp = s.1;
             tmp.mul_assign(&coeff);
@@ -302,7 +292,7 @@ impl<'a, Scalar: PrimeField> Sub<(Scalar, &'a LinearCombination<Scalar>)>
 }
 
 /// This is an error that could occur during circuit synthesis contexts,
-/// such as CRS generation or proving.
+/// such as CRS generation, proving or verification.
 #[derive(Debug)]
 pub enum SynthesisError {
     /// During synthesis, we lacked knowledge of a variable assignment.
@@ -317,6 +307,8 @@ pub enum SynthesisError {
     UnexpectedIdentity,
     /// During proof generation, we encountered an I/O error with the CRS
     IoError(io::Error),
+    /// During verification, our verifying key was malformed.
+    MalformedVerifyingKey,
     /// During CRS generation, we observed an unconstrained auxiliary variable
     UnconstrainedVariable,
 }
@@ -338,6 +330,7 @@ impl Error for SynthesisError {
             SynthesisError::PolynomialDegreeTooLarge => "polynomial degree is too large",
             SynthesisError::UnexpectedIdentity => "encountered an identity element in the CRS",
             SynthesisError::IoError(_) => "encountered an I/O error",
+            SynthesisError::MalformedVerifyingKey => "malformed verifying key",
             SynthesisError::UnconstrainedVariable => "auxiliary variable was unconstrained",
         }
     }
@@ -349,41 +342,17 @@ impl fmt::Display for SynthesisError {
             write!(f, "I/O error: ")?;
             e.fmt(f)
         } else {
-            write!(f, "{}", self)
+            write!(f, "{}", self.description())
         }
-    }
-}
-
-/// An error during verification.
-#[derive(Debug, Clone)]
-pub enum VerificationError {
-    /// Verification was attempted with a malformed verifying key.
-    InvalidVerifyingKey,
-    /// Proof verification failed.
-    InvalidProof,
-}
-
-impl Error for VerificationError {
-    fn description(&self) -> &str {
-        match *self {
-            VerificationError::InvalidVerifyingKey => "malformed verifying key",
-            VerificationError::InvalidProof => "proof verification failed",
-        }
-    }
-}
-
-impl fmt::Display for VerificationError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        write!(f, "{}", self)
     }
 }
 
 /// Represents a constraint system which can have new variables
 /// allocated and constrains between them formed.
-pub trait ConstraintSystem<Scalar: PrimeField>: Sized {
+pub trait ConstraintSystem<E: ScalarEngine>: Sized {
     /// Represents the type of the "root" of this constraint system
     /// so that nested namespaces can minimize indirection.
-    type Root: ConstraintSystem<Scalar>;
+    type Root: ConstraintSystem<E>;
 
     /// Return the "one" input variable
     fn one() -> Variable {
@@ -396,7 +365,7 @@ pub trait ConstraintSystem<Scalar: PrimeField>: Sized {
     /// namespace.
     fn alloc<F, A, AR>(&mut self, annotation: A, f: F) -> Result<Variable, SynthesisError>
     where
-        F: FnOnce() -> Result<Scalar, SynthesisError>,
+        F: FnOnce() -> Result<E::Fr, SynthesisError>,
         A: FnOnce() -> AR,
         AR: Into<String>;
 
@@ -404,7 +373,7 @@ pub trait ConstraintSystem<Scalar: PrimeField>: Sized {
     /// determine the assignment of the variable.
     fn alloc_input<F, A, AR>(&mut self, annotation: A, f: F) -> Result<Variable, SynthesisError>
     where
-        F: FnOnce() -> Result<Scalar, SynthesisError>,
+        F: FnOnce() -> Result<E::Fr, SynthesisError>,
         A: FnOnce() -> AR,
         AR: Into<String>;
 
@@ -414,9 +383,9 @@ pub trait ConstraintSystem<Scalar: PrimeField>: Sized {
     where
         A: FnOnce() -> AR,
         AR: Into<String>,
-        LA: FnOnce(LinearCombination<Scalar>) -> LinearCombination<Scalar>,
-        LB: FnOnce(LinearCombination<Scalar>) -> LinearCombination<Scalar>,
-        LC: FnOnce(LinearCombination<Scalar>) -> LinearCombination<Scalar>;
+        LA: FnOnce(LinearCombination<E>) -> LinearCombination<E>,
+        LB: FnOnce(LinearCombination<E>) -> LinearCombination<E>,
+        LC: FnOnce(LinearCombination<E>) -> LinearCombination<E>;
 
     /// Create a new (sub)namespace and enter into it. Not intended
     /// for downstream use; use `namespace` instead.
@@ -434,7 +403,7 @@ pub trait ConstraintSystem<Scalar: PrimeField>: Sized {
     fn get_root(&mut self) -> &mut Self::Root;
 
     /// Begin a namespace for this constraint system.
-    fn namespace<NR, N>(&mut self, name_fn: N) -> Namespace<'_, Scalar, Self::Root>
+    fn namespace<NR, N>(&mut self, name_fn: N) -> Namespace<'_, E, Self::Root>
     where
         NR: Into<String>,
         N: FnOnce() -> NR,
@@ -447,14 +416,9 @@ pub trait ConstraintSystem<Scalar: PrimeField>: Sized {
 
 /// This is a "namespaced" constraint system which borrows a constraint system (pushing
 /// a namespace context) and, when dropped, pops out of the namespace context.
-pub struct Namespace<'a, Scalar: PrimeField, CS: ConstraintSystem<Scalar>>(
-    &'a mut CS,
-    PhantomData<Scalar>,
-);
+pub struct Namespace<'a, E: ScalarEngine, CS: ConstraintSystem<E>>(&'a mut CS, PhantomData<E>);
 
-impl<'cs, Scalar: PrimeField, CS: ConstraintSystem<Scalar>> ConstraintSystem<Scalar>
-    for Namespace<'cs, Scalar, CS>
-{
+impl<'cs, E: ScalarEngine, CS: ConstraintSystem<E>> ConstraintSystem<E> for Namespace<'cs, E, CS> {
     type Root = CS::Root;
 
     fn one() -> Variable {
@@ -463,7 +427,7 @@ impl<'cs, Scalar: PrimeField, CS: ConstraintSystem<Scalar>> ConstraintSystem<Sca
 
     fn alloc<F, A, AR>(&mut self, annotation: A, f: F) -> Result<Variable, SynthesisError>
     where
-        F: FnOnce() -> Result<Scalar, SynthesisError>,
+        F: FnOnce() -> Result<E::Fr, SynthesisError>,
         A: FnOnce() -> AR,
         AR: Into<String>,
     {
@@ -472,7 +436,7 @@ impl<'cs, Scalar: PrimeField, CS: ConstraintSystem<Scalar>> ConstraintSystem<Sca
 
     fn alloc_input<F, A, AR>(&mut self, annotation: A, f: F) -> Result<Variable, SynthesisError>
     where
-        F: FnOnce() -> Result<Scalar, SynthesisError>,
+        F: FnOnce() -> Result<E::Fr, SynthesisError>,
         A: FnOnce() -> AR,
         AR: Into<String>,
     {
@@ -483,9 +447,9 @@ impl<'cs, Scalar: PrimeField, CS: ConstraintSystem<Scalar>> ConstraintSystem<Sca
     where
         A: FnOnce() -> AR,
         AR: Into<String>,
-        LA: FnOnce(LinearCombination<Scalar>) -> LinearCombination<Scalar>,
-        LB: FnOnce(LinearCombination<Scalar>) -> LinearCombination<Scalar>,
-        LC: FnOnce(LinearCombination<Scalar>) -> LinearCombination<Scalar>,
+        LA: FnOnce(LinearCombination<E>) -> LinearCombination<E>,
+        LB: FnOnce(LinearCombination<E>) -> LinearCombination<E>,
+        LC: FnOnce(LinearCombination<E>) -> LinearCombination<E>,
     {
         self.0.enforce(annotation, a, b, c)
     }
@@ -511,17 +475,15 @@ impl<'cs, Scalar: PrimeField, CS: ConstraintSystem<Scalar>> ConstraintSystem<Sca
     }
 }
 
-impl<'a, Scalar: PrimeField, CS: ConstraintSystem<Scalar>> Drop for Namespace<'a, Scalar, CS> {
+impl<'a, E: ScalarEngine, CS: ConstraintSystem<E>> Drop for Namespace<'a, E, CS> {
     fn drop(&mut self) {
         self.get_root().pop_namespace()
     }
 }
 
-/// Convenience implementation of ConstraintSystem<Scalar> for mutable references to
+/// Convenience implementation of ConstraintSystem<E> for mutable references to
 /// constraint systems.
-impl<'cs, Scalar: PrimeField, CS: ConstraintSystem<Scalar>> ConstraintSystem<Scalar>
-    for &'cs mut CS
-{
+impl<'cs, E: ScalarEngine, CS: ConstraintSystem<E>> ConstraintSystem<E> for &'cs mut CS {
     type Root = CS::Root;
 
     fn one() -> Variable {
@@ -530,7 +492,7 @@ impl<'cs, Scalar: PrimeField, CS: ConstraintSystem<Scalar>> ConstraintSystem<Sca
 
     fn alloc<F, A, AR>(&mut self, annotation: A, f: F) -> Result<Variable, SynthesisError>
     where
-        F: FnOnce() -> Result<Scalar, SynthesisError>,
+        F: FnOnce() -> Result<E::Fr, SynthesisError>,
         A: FnOnce() -> AR,
         AR: Into<String>,
     {
@@ -539,7 +501,7 @@ impl<'cs, Scalar: PrimeField, CS: ConstraintSystem<Scalar>> ConstraintSystem<Sca
 
     fn alloc_input<F, A, AR>(&mut self, annotation: A, f: F) -> Result<Variable, SynthesisError>
     where
-        F: FnOnce() -> Result<Scalar, SynthesisError>,
+        F: FnOnce() -> Result<E::Fr, SynthesisError>,
         A: FnOnce() -> AR,
         AR: Into<String>,
     {
@@ -550,9 +512,9 @@ impl<'cs, Scalar: PrimeField, CS: ConstraintSystem<Scalar>> ConstraintSystem<Sca
     where
         A: FnOnce() -> AR,
         AR: Into<String>,
-        LA: FnOnce(LinearCombination<Scalar>) -> LinearCombination<Scalar>,
-        LB: FnOnce(LinearCombination<Scalar>) -> LinearCombination<Scalar>,
-        LC: FnOnce(LinearCombination<Scalar>) -> LinearCombination<Scalar>,
+        LA: FnOnce(LinearCombination<E>) -> LinearCombination<E>,
+        LB: FnOnce(LinearCombination<E>) -> LinearCombination<E>,
+        LC: FnOnce(LinearCombination<E>) -> LinearCombination<E>,
     {
         (**self).enforce(annotation, a, b, c)
     }

@@ -4,8 +4,7 @@
 
 use super::ArrayLength;
 use core::iter::FromIterator;
-
-use crate::sequence::*;
+use sequence::*;
 
 /// Defines the relationship between one generic sequence and another,
 /// for operations such as `map` and `zip`.

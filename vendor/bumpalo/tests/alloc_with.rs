@@ -1,3 +1,5 @@
+#![cfg(not(debug_assertions))]
+
 // All of these alloc_with tests will fail with "fatal runtime error: stack overflow" unless LLVM
 // manages to optimize the stack writes away.
 //
@@ -7,7 +9,6 @@
 use bumpalo::Bump;
 
 #[test]
-#[cfg_attr(debug_assertions, ignore)]
 fn alloc_with_large_array() {
     let b = Bump::new();
 
@@ -23,7 +24,6 @@ struct LargeStruct {
 }
 
 #[test]
-#[cfg_attr(debug_assertions, ignore)]
 fn alloc_with_large_struct() {
     let b = Bump::new();
 
@@ -36,7 +36,6 @@ fn alloc_with_large_struct() {
 }
 
 #[test]
-#[cfg_attr(debug_assertions, ignore)]
 fn alloc_with_large_tuple() {
     let b = Bump::new();
 
@@ -60,7 +59,6 @@ enum LargeEnum {
 }
 
 #[test]
-#[cfg_attr(debug_assertions, ignore)]
 fn alloc_with_large_enum() {
     let b = Bump::new();
 

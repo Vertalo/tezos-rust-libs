@@ -1,9 +1,9 @@
 use bellman::gadgets::boolean::Boolean;
 use bellman::gadgets::sha256::sha256_block_no_padding;
 use bellman::{ConstraintSystem, SynthesisError};
-use ff::PrimeField;
+use pairing::Engine;
 
-fn prf<Scalar, CS>(
+fn prf<E, CS>(
     cs: CS,
     a: bool,
     b: bool,
@@ -13,8 +13,8 @@ fn prf<Scalar, CS>(
     y: &[Boolean],
 ) -> Result<Vec<Boolean>, SynthesisError>
 where
-    Scalar: PrimeField,
-    CS: ConstraintSystem<Scalar>,
+    E: Engine,
+    CS: ConstraintSystem<E>,
 {
     assert_eq!(x.len(), 252);
     assert_eq!(y.len(), 256);
@@ -32,10 +32,10 @@ where
     sha256_block_no_padding(cs, &image)
 }
 
-pub fn prf_a_pk<Scalar, CS>(cs: CS, a_sk: &[Boolean]) -> Result<Vec<Boolean>, SynthesisError>
+pub fn prf_a_pk<E, CS>(cs: CS, a_sk: &[Boolean]) -> Result<Vec<Boolean>, SynthesisError>
 where
-    Scalar: PrimeField,
-    CS: ConstraintSystem<Scalar>,
+    E: Engine,
+    CS: ConstraintSystem<E>,
 {
     prf(
         cs,
@@ -50,40 +50,40 @@ where
     )
 }
 
-pub fn prf_nf<Scalar, CS>(
+pub fn prf_nf<E, CS>(
     cs: CS,
     a_sk: &[Boolean],
     rho: &[Boolean],
 ) -> Result<Vec<Boolean>, SynthesisError>
 where
-    Scalar: PrimeField,
-    CS: ConstraintSystem<Scalar>,
+    E: Engine,
+    CS: ConstraintSystem<E>,
 {
     prf(cs, true, true, true, false, a_sk, rho)
 }
 
-pub fn prf_pk<Scalar, CS>(
+pub fn prf_pk<E, CS>(
     cs: CS,
     a_sk: &[Boolean],
     h_sig: &[Boolean],
     nonce: bool,
 ) -> Result<Vec<Boolean>, SynthesisError>
 where
-    Scalar: PrimeField,
-    CS: ConstraintSystem<Scalar>,
+    E: Engine,
+    CS: ConstraintSystem<E>,
 {
     prf(cs, false, nonce, false, false, a_sk, h_sig)
 }
 
-pub fn prf_rho<Scalar, CS>(
+pub fn prf_rho<E, CS>(
     cs: CS,
     phi: &[Boolean],
     h_sig: &[Boolean],
     nonce: bool,
 ) -> Result<Vec<Boolean>, SynthesisError>
 where
-    Scalar: PrimeField,
-    CS: ConstraintSystem<Scalar>,
+    E: Engine,
+    CS: ConstraintSystem<E>,
 {
     prf(cs, false, nonce, true, false, phi, h_sig)
 }

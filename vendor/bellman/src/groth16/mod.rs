@@ -2,8 +2,8 @@
 //!
 //! [Groth16]: https://eprint.iacr.org/2016/260
 
-use group::{prime::PrimeCurveAffine, GroupEncoding, UncompressedEncoding};
-use pairing::{Engine, MultiMillerLoop};
+use group::{CurveAffine, EncodedPoint};
+use pairing::{Engine, PairingCurveAffine};
 
 use crate::SynthesisError;
 
@@ -38,27 +38,23 @@ impl<E: Engine> PartialEq for Proof<E> {
 
 impl<E: Engine> Proof<E> {
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        writer.write_all(self.a.to_bytes().as_ref())?;
-        writer.write_all(self.b.to_bytes().as_ref())?;
-        writer.write_all(self.c.to_bytes().as_ref())?;
+        writer.write_all(self.a.into_compressed().as_ref())?;
+        writer.write_all(self.b.into_compressed().as_ref())?;
+        writer.write_all(self.c.into_compressed().as_ref())?;
 
         Ok(())
     }
 
     pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
-        let read_g1 = |reader: &mut R| -> io::Result<E::G1Affine> {
-            let mut g1_repr = <E::G1Affine as GroupEncoding>::Repr::default();
-            reader.read_exact(g1_repr.as_mut())?;
+        let mut g1_repr = <E::G1Affine as CurveAffine>::Compressed::empty();
+        let mut g2_repr = <E::G2Affine as CurveAffine>::Compressed::empty();
 
-            let affine = E::G1Affine::from_bytes(&g1_repr);
-            let affine = if affine.is_some().into() {
-                Ok(affine.unwrap())
-            } else {
-                Err(io::Error::new(io::ErrorKind::InvalidData, "invalid G1"))
-            };
-
-            affine.and_then(|e| {
-                if e.is_identity().into() {
+        reader.read_exact(g1_repr.as_mut())?;
+        let a = g1_repr
+            .into_affine()
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+            .and_then(|e| {
+                if e.is_zero() {
                     Err(io::Error::new(
                         io::ErrorKind::InvalidData,
                         "point at infinity",
@@ -66,22 +62,14 @@ impl<E: Engine> Proof<E> {
                 } else {
                     Ok(e)
                 }
-            })
-        };
+            })?;
 
-        let read_g2 = |reader: &mut R| -> io::Result<E::G2Affine> {
-            let mut g2_repr = <E::G2Affine as GroupEncoding>::Repr::default();
-            reader.read_exact(g2_repr.as_mut())?;
-
-            let affine = E::G2Affine::from_bytes(&g2_repr);
-            let affine = if affine.is_some().into() {
-                Ok(affine.unwrap())
-            } else {
-                Err(io::Error::new(io::ErrorKind::InvalidData, "invalid G2"))
-            };
-
-            affine.and_then(|e| {
-                if e.is_identity().into() {
+        reader.read_exact(g2_repr.as_mut())?;
+        let b = g2_repr
+            .into_affine()
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+            .and_then(|e| {
+                if e.is_zero() {
                     Err(io::Error::new(
                         io::ErrorKind::InvalidData,
                         "point at infinity",
@@ -89,12 +77,22 @@ impl<E: Engine> Proof<E> {
                 } else {
                     Ok(e)
                 }
-            })
-        };
+            })?;
 
-        let a = read_g1(&mut reader)?;
-        let b = read_g2(&mut reader)?;
-        let c = read_g1(&mut reader)?;
+        reader.read_exact(g1_repr.as_mut())?;
+        let c = g1_repr
+            .into_affine()
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+            .and_then(|e| {
+                if e.is_zero() {
+                    Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "point at infinity",
+                    ))
+                } else {
+                    Ok(e)
+                }
+            })?;
 
         Ok(Proof { a, b, c })
     }
@@ -142,67 +140,73 @@ impl<E: Engine> PartialEq for VerifyingKey<E> {
 
 impl<E: Engine> VerifyingKey<E> {
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        writer.write_all(self.alpha_g1.to_uncompressed().as_ref())?;
-        writer.write_all(self.beta_g1.to_uncompressed().as_ref())?;
-        writer.write_all(self.beta_g2.to_uncompressed().as_ref())?;
-        writer.write_all(self.gamma_g2.to_uncompressed().as_ref())?;
-        writer.write_all(self.delta_g1.to_uncompressed().as_ref())?;
-        writer.write_all(self.delta_g2.to_uncompressed().as_ref())?;
+        writer.write_all(self.alpha_g1.into_uncompressed().as_ref())?;
+        writer.write_all(self.beta_g1.into_uncompressed().as_ref())?;
+        writer.write_all(self.beta_g2.into_uncompressed().as_ref())?;
+        writer.write_all(self.gamma_g2.into_uncompressed().as_ref())?;
+        writer.write_all(self.delta_g1.into_uncompressed().as_ref())?;
+        writer.write_all(self.delta_g2.into_uncompressed().as_ref())?;
         writer.write_u32::<BigEndian>(self.ic.len() as u32)?;
         for ic in &self.ic {
-            writer.write_all(ic.to_uncompressed().as_ref())?;
+            writer.write_all(ic.into_uncompressed().as_ref())?;
         }
 
         Ok(())
     }
 
     pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
-        let read_g1 = |reader: &mut R| -> io::Result<E::G1Affine> {
-            let mut g1_repr = <E::G1Affine as UncompressedEncoding>::Uncompressed::default();
-            reader.read_exact(g1_repr.as_mut())?;
+        let mut g1_repr = <E::G1Affine as CurveAffine>::Uncompressed::empty();
+        let mut g2_repr = <E::G2Affine as CurveAffine>::Uncompressed::empty();
 
-            let affine = E::G1Affine::from_uncompressed(&g1_repr);
-            if affine.is_some().into() {
-                Ok(affine.unwrap())
-            } else {
-                Err(io::Error::new(io::ErrorKind::InvalidData, "invalid G1"))
-            }
-        };
+        reader.read_exact(g1_repr.as_mut())?;
+        let alpha_g1 = g1_repr
+            .into_affine()
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
-        let read_g2 = |reader: &mut R| -> io::Result<E::G2Affine> {
-            let mut g2_repr = <E::G2Affine as UncompressedEncoding>::Uncompressed::default();
-            reader.read_exact(g2_repr.as_mut())?;
+        reader.read_exact(g1_repr.as_mut())?;
+        let beta_g1 = g1_repr
+            .into_affine()
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
-            let affine = E::G2Affine::from_uncompressed(&g2_repr);
-            if affine.is_some().into() {
-                Ok(affine.unwrap())
-            } else {
-                Err(io::Error::new(io::ErrorKind::InvalidData, "invalid G2"))
-            }
-        };
+        reader.read_exact(g2_repr.as_mut())?;
+        let beta_g2 = g2_repr
+            .into_affine()
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
-        let alpha_g1 = read_g1(&mut reader)?;
-        let beta_g1 = read_g1(&mut reader)?;
-        let beta_g2 = read_g2(&mut reader)?;
-        let gamma_g2 = read_g2(&mut reader)?;
-        let delta_g1 = read_g1(&mut reader)?;
-        let delta_g2 = read_g2(&mut reader)?;
+        reader.read_exact(g2_repr.as_mut())?;
+        let gamma_g2 = g2_repr
+            .into_affine()
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+
+        reader.read_exact(g1_repr.as_mut())?;
+        let delta_g1 = g1_repr
+            .into_affine()
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+
+        reader.read_exact(g2_repr.as_mut())?;
+        let delta_g2 = g2_repr
+            .into_affine()
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
         let ic_len = reader.read_u32::<BigEndian>()? as usize;
 
         let mut ic = vec![];
 
         for _ in 0..ic_len {
-            let g1 = read_g1(&mut reader).and_then(|e| {
-                if e.is_identity().into() {
-                    Err(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        "point at infinity",
-                    ))
-                } else {
-                    Ok(e)
-                }
-            })?;
+            reader.read_exact(g1_repr.as_mut())?;
+            let g1 = g1_repr
+                .into_affine()
+                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+                .and_then(|e| {
+                    if e.is_zero() {
+                        Err(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            "point at infinity",
+                        ))
+                    } else {
+                        Ok(e)
+                    }
+                })?;
 
             ic.push(g1);
         }
@@ -261,27 +265,27 @@ impl<E: Engine> Parameters<E> {
 
         writer.write_u32::<BigEndian>(self.h.len() as u32)?;
         for g in &self.h[..] {
-            writer.write_all(g.to_uncompressed().as_ref())?;
+            writer.write_all(g.into_uncompressed().as_ref())?;
         }
 
         writer.write_u32::<BigEndian>(self.l.len() as u32)?;
         for g in &self.l[..] {
-            writer.write_all(g.to_uncompressed().as_ref())?;
+            writer.write_all(g.into_uncompressed().as_ref())?;
         }
 
         writer.write_u32::<BigEndian>(self.a.len() as u32)?;
         for g in &self.a[..] {
-            writer.write_all(g.to_uncompressed().as_ref())?;
+            writer.write_all(g.into_uncompressed().as_ref())?;
         }
 
         writer.write_u32::<BigEndian>(self.b_g1.len() as u32)?;
         for g in &self.b_g1[..] {
-            writer.write_all(g.to_uncompressed().as_ref())?;
+            writer.write_all(g.into_uncompressed().as_ref())?;
         }
 
         writer.write_u32::<BigEndian>(self.b_g2.len() as u32)?;
         for g in &self.b_g2[..] {
-            writer.write_all(g.to_uncompressed().as_ref())?;
+            writer.write_all(g.into_uncompressed().as_ref())?;
         }
 
         Ok(())
@@ -289,23 +293,17 @@ impl<E: Engine> Parameters<E> {
 
     pub fn read<R: Read>(mut reader: R, checked: bool) -> io::Result<Self> {
         let read_g1 = |reader: &mut R| -> io::Result<E::G1Affine> {
-            let mut repr = <E::G1Affine as UncompressedEncoding>::Uncompressed::default();
+            let mut repr = <E::G1Affine as CurveAffine>::Uncompressed::empty();
             reader.read_exact(repr.as_mut())?;
 
-            let affine = if checked {
-                E::G1Affine::from_uncompressed(&repr)
+            if checked {
+                repr.into_affine()
             } else {
-                E::G1Affine::from_uncompressed_unchecked(&repr)
-            };
-
-            let affine = if affine.is_some().into() {
-                Ok(affine.unwrap())
-            } else {
-                Err(io::Error::new(io::ErrorKind::InvalidData, "invalid G1"))
-            };
-
-            affine.and_then(|e| {
-                if e.is_identity().into() {
+                repr.into_affine_unchecked()
+            }
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+            .and_then(|e| {
+                if e.is_zero() {
                     Err(io::Error::new(
                         io::ErrorKind::InvalidData,
                         "point at infinity",
@@ -317,23 +315,17 @@ impl<E: Engine> Parameters<E> {
         };
 
         let read_g2 = |reader: &mut R| -> io::Result<E::G2Affine> {
-            let mut repr = <E::G2Affine as UncompressedEncoding>::Uncompressed::default();
+            let mut repr = <E::G2Affine as CurveAffine>::Uncompressed::empty();
             reader.read_exact(repr.as_mut())?;
 
-            let affine = if checked {
-                E::G2Affine::from_uncompressed(&repr)
+            if checked {
+                repr.into_affine()
             } else {
-                E::G2Affine::from_uncompressed_unchecked(&repr)
-            };
-
-            let affine = if affine.is_some().into() {
-                Ok(affine.unwrap())
-            } else {
-                Err(io::Error::new(io::ErrorKind::InvalidData, "invalid G2"))
-            };
-
-            affine.and_then(|e| {
-                if e.is_identity().into() {
+                repr.into_affine_unchecked()
+            }
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+            .and_then(|e| {
+                if e.is_zero() {
                     Err(io::Error::new(
                         io::ErrorKind::InvalidData,
                         "point at infinity",
@@ -398,13 +390,13 @@ impl<E: Engine> Parameters<E> {
     }
 }
 
-pub struct PreparedVerifyingKey<E: MultiMillerLoop> {
+pub struct PreparedVerifyingKey<E: Engine> {
     /// Pairing result of alpha*beta
-    alpha_g1_beta_g2: E::Gt,
+    alpha_g1_beta_g2: E::Fqk,
     /// -gamma in G2
-    neg_gamma_g2: E::G2Prepared,
+    neg_gamma_g2: <E::G2Affine as PairingCurveAffine>::Prepared,
     /// -delta in G2
-    neg_delta_g2: E::G2Prepared,
+    neg_delta_g2: <E::G2Affine as PairingCurveAffine>::Prepared,
     /// Copy of IC from `VerifiyingKey`.
     ic: Vec<E::G1Affine>,
 }
@@ -479,20 +471,19 @@ mod test_with_bls12_381 {
     use super::*;
     use crate::{Circuit, ConstraintSystem, SynthesisError};
 
-    use bls12_381::{Bls12, Scalar};
-    use ff::{Field, PrimeField};
+    use ff::Field;
+    use pairing::bls12_381::{Bls12, Fr};
     use rand::thread_rng;
-    use std::ops::MulAssign;
 
     #[test]
     fn serialization() {
-        struct MySillyCircuit<Scalar: PrimeField> {
-            a: Option<Scalar>,
-            b: Option<Scalar>,
+        struct MySillyCircuit<E: Engine> {
+            a: Option<E::Fr>,
+            b: Option<E::Fr>,
         }
 
-        impl<Scalar: PrimeField> Circuit<Scalar> for MySillyCircuit<Scalar> {
-            fn synthesize<CS: ConstraintSystem<Scalar>>(
+        impl<E: Engine> Circuit<E> for MySillyCircuit<E> {
+            fn synthesize<CS: ConstraintSystem<E>>(
                 self,
                 cs: &mut CS,
             ) -> Result<(), SynthesisError> {
@@ -515,13 +506,11 @@ mod test_with_bls12_381 {
             }
         }
 
-        let mut rng = thread_rng();
+        let rng = &mut thread_rng();
 
-        let params = generate_random_parameters::<Bls12, _, _>(
-            MySillyCircuit { a: None, b: None },
-            &mut rng,
-        )
-        .unwrap();
+        let params =
+            generate_random_parameters::<Bls12, _, _>(MySillyCircuit { a: None, b: None }, rng)
+                .unwrap();
 
         {
             let mut v = vec![];
@@ -539,8 +528,8 @@ mod test_with_bls12_381 {
         let pvk = prepare_verifying_key::<Bls12>(&params.vk);
 
         for _ in 0..100 {
-            let a = Scalar::random(&mut rng);
-            let b = Scalar::random(&mut rng);
+            let a = Fr::random(rng);
+            let b = Fr::random(rng);
             let mut c = a;
             c.mul_assign(&b);
 
@@ -550,7 +539,7 @@ mod test_with_bls12_381 {
                     b: Some(b),
                 },
                 &params,
-                &mut rng,
+                rng,
             )
             .unwrap();
 
@@ -562,8 +551,8 @@ mod test_with_bls12_381 {
             let de_proof = Proof::read(&v[..]).unwrap();
             assert!(proof == de_proof);
 
-            assert!(verify_proof(&pvk, &proof, &[c]).is_ok());
-            assert!(verify_proof(&pvk, &proof, &[a]).is_err());
+            assert!(verify_proof(&pvk, &proof, &[c]).unwrap());
+            assert!(!verify_proof(&pvk, &proof, &[a]).unwrap());
         }
     }
 }

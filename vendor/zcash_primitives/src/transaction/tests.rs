@@ -1,8 +1,12 @@
 use ff::Field;
+use pairing::bls12_381::Bls12;
 use rand_core::OsRng;
 
+use crate::jubjub::{fs::Fs, FixedGenerators};
+
 use super::{components::Amount, sighash::signature_hash, Transaction, TransactionData};
-use crate::{constants::SPENDING_KEY_GENERATOR, redjubjub::PrivateKey};
+use crate::redjubjub::PrivateKey;
+use crate::JUBJUB;
 
 #[test]
 fn tx_read_write() {
@@ -51,9 +55,14 @@ fn tx_write_rejects_unexpected_binding_sig() {
 
     // Fails with an unexpected binding signature
     {
-        let mut rng = OsRng;
-        let sk = PrivateKey(jubjub::Fr::random(&mut rng));
-        let sig = sk.sign(b"Foo bar", &mut rng, SPENDING_KEY_GENERATOR);
+        let rng = &mut OsRng;
+        let sk = PrivateKey::<Bls12>(Fs::random(rng));
+        let sig = sk.sign(
+            b"Foo bar",
+            rng,
+            FixedGenerators::SpendingKeyGenerator,
+            &JUBJUB,
+        );
 
         let mut tx = TransactionData::new();
         tx.binding_sig = Some(sig);

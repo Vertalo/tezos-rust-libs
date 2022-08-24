@@ -1,8 +1,8 @@
-//! This crate implements a structure that can be used as a generic array type.
+//! This crate implements a structure that can be used as a generic array type.use
 //! Core Rust array types `[T; N]` can't be used generically with
 //! respect to `N`, so for example this:
 //!
-//! ```rust{compile_fail}
+//! ```{should_fail}
 //! struct Foo<T, N> {
 //!     data: [T; N]
 //! }
@@ -13,9 +13,8 @@
 //! **generic-array** exports a `GenericArray<T,N>` type, which lets
 //! the above be implemented as:
 //!
-//! ```rust
-//! use generic_array::{ArrayLength, GenericArray};
-//!
+//! ```
+//! # use generic_array::{ArrayLength, GenericArray};
 //! struct Foo<T, N: ArrayLength<T>> {
 //!     data: GenericArray<T,N>
 //! }
@@ -23,35 +22,7 @@
 //!
 //! The `ArrayLength<T>` trait is implemented by default for
 //! [unsigned integer types](../typenum/uint/index.html) from
-//! [typenum](../typenum/index.html):
-//!
-//! ```rust
-//! # use generic_array::{ArrayLength, GenericArray};
-//! use generic_array::typenum::U5;
-//!
-//! struct Foo<N: ArrayLength<i32>> {
-//!     data: GenericArray<i32, N>
-//! }
-//!
-//! # fn main() {
-//! let foo = Foo::<U5>{data: GenericArray::default()};
-//! # }
-//! ```
-//!
-//! For example, `GenericArray<T, U5>` would work almost like `[T; 5]`:
-//!
-//! ```rust
-//! # use generic_array::{ArrayLength, GenericArray};
-//! use generic_array::typenum::U5;
-//!
-//! struct Foo<T, N: ArrayLength<T>> {
-//!     data: GenericArray<T, N>
-//! }
-//!
-//! # fn main() {
-//! let foo = Foo::<i32, U5>{data: GenericArray::default()};
-//! # }
-//! ```
+//! [typenum](../typenum/index.html).
 //!
 //! For ease of use, an `arr!` macro is provided - example below:
 //!
@@ -66,7 +37,6 @@
 //! ```
 
 #![deny(missing_docs)]
-#![deny(meta_variable_misuse)]
 #![no_std]
 
 #[cfg(feature = "serde")]
@@ -81,11 +51,11 @@ mod hex;
 mod impls;
 
 #[cfg(feature = "serde")]
-mod impl_serde;
+pub mod impl_serde;
 
 use core::iter::FromIterator;
 use core::marker::PhantomData;
-use core::mem::{MaybeUninit, ManuallyDrop};
+use core::mem::ManuallyDrop;
 use core::ops::{Deref, DerefMut};
 use core::{mem, ptr, slice};
 use typenum::bit::{B0, B1};
@@ -97,9 +67,9 @@ pub mod functional;
 pub mod iter;
 pub mod sequence;
 
-use self::functional::*;
-pub use self::iter::GenericArrayIter;
-use self::sequence::*;
+use functional::*;
+pub use iter::GenericArrayIter;
+use sequence::*;
 
 /// Trait making `GenericArray` work, marking types to be used as length of an array
 pub unsafe trait ArrayLength<T>: Unsigned {
@@ -109,7 +79,7 @@ pub unsafe trait ArrayLength<T>: Unsigned {
 
 unsafe impl<T> ArrayLength<T> for UTerm {
     #[doc(hidden)]
-    type ArrayType = [T; 0];
+    type ArrayType = ();
 }
 
 /// Internal type used to generate a struct of appropriate size
@@ -168,7 +138,6 @@ unsafe impl<T, N: ArrayLength<T>> ArrayLength<T> for UInt<N, B1> {
 
 /// Struct representing a generic array - `GenericArray<T, N>` works like [T; N]
 #[allow(dead_code)]
-#[repr(transparent)]
 pub struct GenericArray<T, U: ArrayLength<T>> {
     data: U::ArrayType,
 }
@@ -184,7 +153,7 @@ where
 
     #[inline(always)]
     fn deref(&self) -> &[T] {
-        unsafe { slice::from_raw_parts(self as *const Self as *const T, N::USIZE) }
+        unsafe { slice::from_raw_parts(self as *const Self as *const T, N::to_usize()) }
     }
 }
 
@@ -194,7 +163,7 @@ where
 {
     #[inline(always)]
     fn deref_mut(&mut self) -> &mut [T] {
-        unsafe { slice::from_raw_parts_mut(self as *mut Self as *mut T, N::USIZE) }
+        unsafe { slice::from_raw_parts_mut(self as *mut Self as *mut T, N::to_usize()) }
     }
 }
 
@@ -205,7 +174,7 @@ where
 /// which will be dropped if `into_inner` is not called.
 #[doc(hidden)]
 pub struct ArrayBuilder<T, N: ArrayLength<T>> {
-    array: MaybeUninit<GenericArray<T, N>>,
+    array: ManuallyDrop<GenericArray<T, N>>,
     position: usize,
 }
 
@@ -214,7 +183,7 @@ impl<T, N: ArrayLength<T>> ArrayBuilder<T, N> {
     #[inline]
     pub unsafe fn new() -> ArrayBuilder<T, N> {
         ArrayBuilder {
-            array: MaybeUninit::uninit(),
+            array: ManuallyDrop::new(mem::uninitialized()),
             position: 0,
         }
     }
@@ -226,7 +195,7 @@ impl<T, N: ArrayLength<T>> ArrayBuilder<T, N> {
     #[doc(hidden)]
     #[inline]
     pub unsafe fn iter_position(&mut self) -> (slice::IterMut<T>, &mut usize) {
-        ((&mut *self.array.as_mut_ptr()).iter_mut(), &mut self.position)
+        (self.array.iter_mut(), &mut self.position)
     }
 
     /// When done writing (assuming all elements have been written to),
@@ -238,17 +207,15 @@ impl<T, N: ArrayLength<T>> ArrayBuilder<T, N> {
 
         mem::forget(self);
 
-        array.assume_init()
+        ManuallyDrop::into_inner(array)
     }
 }
 
 impl<T, N: ArrayLength<T>> Drop for ArrayBuilder<T, N> {
     fn drop(&mut self) {
-        if mem::needs_drop::<T>() {
+        for value in &mut self.array[..self.position] {
             unsafe {
-                for value in &mut (&mut *self.array.as_mut_ptr())[..self.position] {
-                    ptr::drop_in_place(value);
-                }
+                ptr::drop_in_place(value);
             }
         }
     }
@@ -287,11 +254,9 @@ impl<T, N: ArrayLength<T>> ArrayConsumer<T, N> {
 
 impl<T, N: ArrayLength<T>> Drop for ArrayConsumer<T, N> {
     fn drop(&mut self) {
-        if mem::needs_drop::<T>() {
-            for value in &mut self.array[self.position..N::USIZE] {
-                unsafe {
-                    ptr::drop_in_place(value);
-                }
+        for value in &mut self.array[self.position..N::to_usize()] {
+            unsafe {
+                ptr::drop_in_place(value);
             }
         }
     }
@@ -335,17 +300,15 @@ where
             {
                 let (destination_iter, position) = destination.iter_position();
 
-                iter.into_iter()
-                    .zip(destination_iter)
-                    .for_each(|(src, dst)| {
-                        ptr::write(dst, src);
+                for (src, dst) in iter.into_iter().zip(destination_iter) {
+                    ptr::write(dst, src);
 
-                        *position += 1;
-                    });
+                    *position += 1;
+                }
             }
 
-            if destination.position < N::USIZE {
-                from_iter_length_fail(destination.position, N::USIZE);
+            if destination.position < N::to_usize() {
+                from_iter_length_fail(destination.position, N::to_usize());
             }
 
             destination.into_inner()
@@ -380,11 +343,11 @@ where
             {
                 let (destination_iter, position) = destination.iter_position();
 
-                destination_iter.enumerate().for_each(|(i, dst)| {
+                for (i, dst) in destination_iter.enumerate() {
                     ptr::write(dst, f(i));
 
                     *position += 1;
-                });
+                }
             }
 
             destination.into_inner()
@@ -556,7 +519,7 @@ impl<'a, T, N: ArrayLength<T>> From<&'a [T]> for &'a GenericArray<T, N> {
     /// Length of the slice must be equal to the length of the array.
     #[inline]
     fn from(slice: &[T]) -> &GenericArray<T, N> {
-        assert_eq!(slice.len(), N::USIZE);
+        assert_eq!(slice.len(), N::to_usize());
 
         unsafe { &*(slice.as_ptr() as *const GenericArray<T, N>) }
     }
@@ -568,7 +531,7 @@ impl<'a, T, N: ArrayLength<T>> From<&'a mut [T]> for &'a mut GenericArray<T, N> 
     /// Length of the slice must be equal to the length of the array.
     #[inline]
     fn from(slice: &mut [T]) -> &mut GenericArray<T, N> {
-        assert_eq!(slice.len(), N::USIZE);
+        assert_eq!(slice.len(), N::to_usize());
 
         unsafe { &mut *(slice.as_mut_ptr() as *mut GenericArray<T, N>) }
     }
@@ -592,39 +555,34 @@ impl<T, N> GenericArray<T, N>
 where
     N: ArrayLength<T>,
 {
-    /// Creates a new `GenericArray` instance from an iterator with a specific size.
+    /// Creates a new `GenericArray` instance from an iterator with a known exact size.
     ///
     /// Returns `None` if the size is not equal to the number of elements in the `GenericArray`.
     pub fn from_exact_iter<I>(iter: I) -> Option<Self>
     where
         I: IntoIterator<Item = T>,
+        <I as IntoIterator>::IntoIter: ExactSizeIterator,
     {
-        let mut iter = iter.into_iter();
+        let iter = iter.into_iter();
 
-        unsafe {
-            let mut destination = ArrayBuilder::new();
+        if iter.len() == N::to_usize() {
+            unsafe {
+                let mut destination = ArrayBuilder::new();
 
-            {
-                let (destination_iter, position) = destination.iter_position();
+                {
+                    let (destination_iter, position) = destination.iter_position();
 
-                destination_iter.zip(&mut iter).for_each(|(dst, src)| {
-                    ptr::write(dst, src);
+                    for (dst, src) in destination_iter.zip(iter.into_iter()) {
+                        ptr::write(dst, src);
 
-                    *position += 1;
-                });
-
-                // The iterator produced fewer than `N` elements.
-                if *position != N::USIZE {
-                    return None;
+                        *position += 1;
+                    }
                 }
 
-                // The iterator produced more than `N` elements.
-                if iter.next().is_some() {
-                    return None;
-                }
+                Some(destination.into_inner())
             }
-
-            Some(destination.into_inner())
+        } else {
+            None
         }
     }
 }
@@ -634,8 +592,9 @@ where
 #[inline]
 #[doc(hidden)]
 pub unsafe fn transmute<A, B>(a: A) -> B {
-    let a = ManuallyDrop::new(a);
-    ::core::ptr::read(&*a as *const A as *const B)
+    let b = ::core::ptr::read(&a as *const A as *const B);
+    ::core::mem::forget(a);
+    b
 }
 
 #[cfg(test)]
@@ -657,7 +616,7 @@ mod test {
 
     #[test]
     fn test_assembly() {
-        use crate::functional::*;
+        use functional::*;
 
         let a = black_box(arr![i32; 1, 3, 5, 7]);
         let b = black_box(arr![i32; 2, 4, 6, 8]);

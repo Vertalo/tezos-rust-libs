@@ -3,7 +3,7 @@
 # When uploading crates to the registry Cargo will automatically
 # "normalize" Cargo.toml files for maximal compatibility
 # with all versions of Cargo and also rewrite `path` dependencies
-# to registry (e.g., crates.io) dependencies
+# to registry (e.g. crates.io) dependencies
 #
 # If you believe there's an error in this file please file an
 # issue against the rust-lang/cargo repository. If you're
@@ -11,9 +11,8 @@
 # will likely look very different (and much more reasonable)
 
 [package]
-edition = "2018"
 name = "aesni"
-version = "0.8.0"
+version = "0.6.0"
 authors = ["RustCrypto Developers"]
 description = "AES (Rijndael) block ciphers implementation using AES-NI"
 documentation = "https://docs.rs/aesni"
@@ -24,22 +23,21 @@ repository = "https://github.com/RustCrypto/block-ciphers"
 [package.metadata.docs.rs]
 rustc-args = ["-C", "target-feature=+aes,+ssse3"]
 rustdoc-args = ["-C", "target-feature=+aes,+ssse3"]
-[dependencies.block-cipher]
-version = "0.8"
+[dependencies.block-cipher-trait]
+version = "0.6"
 
 [dependencies.opaque-debug]
-version = "0.3"
+version = "0.2"
 
 [dependencies.stream-cipher]
-version = "0.6"
-features = ["block-cipher"]
+version = "0.3"
 optional = true
-[dev-dependencies.block-cipher]
-version = "0.8"
+[dev-dependencies.block-cipher-trait]
+version = "0.6"
 features = ["dev"]
 
 [dev-dependencies.stream-cipher]
-version = "0.6"
+version = "0.3"
 features = ["dev"]
 
 [features]

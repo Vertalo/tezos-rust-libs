@@ -4,11 +4,12 @@ use rand::thread_rng;
 // For benchmarking
 use std::time::{Duration, Instant};
 
-// Bring in some tools for using finite fiels
-use ff::{Field, PrimeField};
+// Bring in some tools for using pairing-friendly curves
+use ff::{Field, ScalarEngine};
+use pairing::Engine;
 
 // We're going to use the BLS12-381 pairing-friendly elliptic curve.
-use bls12_381::{Bls12, Scalar};
+use pairing::bls12_381::Bls12;
 
 // We'll use these interfaces to construct our circuit.
 use bellman::{Circuit, ConstraintSystem, SynthesisError};
@@ -33,13 +34,14 @@ const MIMC_ROUNDS: usize = 322;
 ///     return xL
 /// }
 /// ```
-fn mimc<Scalar: PrimeField>(mut xl: Scalar, mut xr: Scalar, constants: &[Scalar]) -> Scalar {
+fn mimc<E: Engine>(mut xl: E::Fr, mut xr: E::Fr, constants: &[E::Fr]) -> E::Fr {
     assert_eq!(constants.len(), MIMC_ROUNDS);
 
     for i in 0..MIMC_ROUNDS {
         let mut tmp1 = xl;
         tmp1.add_assign(&constants[i]);
-        let mut tmp2 = tmp1.square();
+        let mut tmp2 = tmp1;
+        tmp2.square();
         tmp2.mul_assign(&tmp1);
         tmp2.add_assign(&xr);
         xr = xl;
@@ -51,17 +53,17 @@ fn mimc<Scalar: PrimeField>(mut xl: Scalar, mut xr: Scalar, constants: &[Scalar]
 
 /// This is our demo circuit for proving knowledge of the
 /// preimage of a MiMC hash invocation.
-struct MiMCDemo<'a, Scalar: PrimeField> {
-    xl: Option<Scalar>,
-    xr: Option<Scalar>,
-    constants: &'a [Scalar],
+struct MiMCDemo<'a, E: Engine> {
+    xl: Option<E::Fr>,
+    xr: Option<E::Fr>,
+    constants: &'a [E::Fr],
 }
 
 /// Our demo circuit implements this `Circuit` trait which
 /// is used during paramgen and proving in order to
 /// synthesize the constraint system.
-impl<'a, Scalar: PrimeField> Circuit<Scalar> for MiMCDemo<'a, Scalar> {
-    fn synthesize<CS: ConstraintSystem<Scalar>>(self, cs: &mut CS) -> Result<(), SynthesisError> {
+impl<'a, E: Engine> Circuit<E> for MiMCDemo<'a, E> {
+    fn synthesize<CS: ConstraintSystem<E>>(self, cs: &mut CS) -> Result<(), SynthesisError> {
         assert_eq!(self.constants.len(), MIMC_ROUNDS);
 
         // Allocate the first component of the preimage.
@@ -85,7 +87,8 @@ impl<'a, Scalar: PrimeField> Circuit<Scalar> for MiMCDemo<'a, Scalar> {
             // tmp = (xL + Ci)^2
             let tmp_value = xl_value.map(|mut e| {
                 e.add_assign(&self.constants[i]);
-                e.square()
+                e.square();
+                e
             });
             let tmp = cs.alloc(
                 || "tmp",
@@ -147,24 +150,24 @@ impl<'a, Scalar: PrimeField> Circuit<Scalar> for MiMCDemo<'a, Scalar> {
 fn test_mimc() {
     // This may not be cryptographically safe, use
     // `OsRng` (for example) in production software.
-    let mut rng = thread_rng();
+    let rng = &mut thread_rng();
 
     // Generate the MiMC round constants
     let constants = (0..MIMC_ROUNDS)
-        .map(|_| Scalar::random(&mut rng))
+        .map(|_| <Bls12 as ScalarEngine>::Fr::random(rng))
         .collect::<Vec<_>>();
 
     println!("Creating parameters...");
 
     // Create parameters for our circuit
     let params = {
-        let c = MiMCDemo {
+        let c = MiMCDemo::<Bls12> {
             xl: None,
             xr: None,
             constants: &constants,
         };
 
-        generate_random_parameters::<Bls12, _, _>(c, &mut rng).unwrap()
+        generate_random_parameters(c, rng).unwrap()
     };
 
     // Prepare the verification key (for proof verification)
@@ -183,9 +186,9 @@ fn test_mimc() {
 
     for _ in 0..SAMPLES {
         // Generate a random preimage and compute the image
-        let xl = Scalar::random(&mut rng);
-        let xr = Scalar::random(&mut rng);
-        let image = mimc(xl, xr, &constants);
+        let xl = <Bls12 as ScalarEngine>::Fr::random(rng);
+        let xr = <Bls12 as ScalarEngine>::Fr::random(rng);
+        let image = mimc::<Bls12>(xl, xr, &constants);
 
         proof_vec.truncate(0);
 
@@ -200,7 +203,7 @@ fn test_mimc() {
             };
 
             // Create a groth16 proof with our parameters.
-            let proof = create_random_proof(c, &params, &mut rng).unwrap();
+            let proof = create_random_proof(c, &params, rng).unwrap();
 
             proof.write(&mut proof_vec).unwrap();
         }
@@ -210,7 +213,7 @@ fn test_mimc() {
         let start = Instant::now();
         let proof = Proof::read(&proof_vec[..]).unwrap();
         // Check the proof
-        assert!(verify_proof(&pvk, &proof, &[image]).is_ok());
+        assert!(verify_proof(&pvk, &proof, &[image]).unwrap());
         total_verifying += start.elapsed();
     }
     let proving_avg = total_proving / SAMPLES;

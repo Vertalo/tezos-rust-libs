@@ -1,15 +1,17 @@
-#![allow(clippy::unreadable_literal)]
-
-use crate::arch::*;
-use core::{cmp, mem};
+use core::{mem, cmp};
+use arch::*;
 
 use super::{Aes128, Aes192, Aes256};
-use block_cipher::{consts::U16, generic_array::GenericArray, BlockCipher};
-use stream_cipher::{FromBlockCipher, LoopError, SyncStreamCipher, SyncStreamCipherSeek};
+use block_cipher_trait::BlockCipher;
+use block_cipher_trait::generic_array::GenericArray;
+use block_cipher_trait::generic_array::typenum::U16;
+use stream_cipher::{
+    SyncStreamCipher, SyncStreamCipherSeek, NewStreamCipher, LoopError,
+};
 
 const BLOCK_SIZE: usize = 16;
 const PAR_BLOCKS: usize = 8;
-const PAR_BLOCKS_SIZE: usize = PAR_BLOCKS * BLOCK_SIZE;
+const PAR_BLOCKS_SIZE: usize = PAR_BLOCKS*BLOCK_SIZE;
 
 #[inline(always)]
 pub fn xor(buf: &mut [u8], key: &[u8]) {
@@ -22,13 +24,10 @@ pub fn xor(buf: &mut [u8], key: &[u8]) {
 #[inline(always)]
 fn xor_block8(buf: &mut [u8], ctr: [__m128i; 8]) {
     debug_assert_eq!(buf.len(), PAR_BLOCKS_SIZE);
-
-    // Safety: `loadu` and `storeu` support unaligned access
-    #[allow(clippy::cast_ptr_alignment)]
     unsafe {
         // compiler should unroll this loop
         for i in 0..8 {
-            let ptr = buf.as_mut_ptr().offset(16 * i) as *mut __m128i;
+            let ptr = buf.as_mut_ptr().offset(16*i) as *mut __m128i;
             let data = _mm_loadu_si128(ptr);
             let data = _mm_xor_si128(data, ctr[i as usize]);
             _mm_storeu_si128(ptr, data);
@@ -51,12 +50,9 @@ fn inc_be(v: __m128i) -> __m128i {
 
 #[inline(always)]
 fn load(val: &GenericArray<u8, U16>) -> __m128i {
-    // Safety: `loadu` supports unaligned loads
-    #[allow(clippy::cast_ptr_alignment)]
-    unsafe {
-        _mm_loadu_si128(val.as_ptr() as *const __m128i)
-    }
+    unsafe { _mm_loadu_si128(val.as_ptr() as *const __m128i) }
 }
+
 
 macro_rules! impl_ctr {
     ($name:ident, $cipher:ty, $doc:expr) => {
@@ -89,7 +85,7 @@ macro_rules! impl_ctr {
             #[inline(always)]
             fn next_block8(&mut self) -> [__m128i; 8] {
                 let mut ctr = self.ctr;
-                let mut block8: [__m128i; 8] = unsafe { mem::zeroed() };
+                let mut block8: [__m128i; 8] = unsafe { mem::uninitialized() };
                 for i in 0..8 {
                     block8[i] = swap_bytes(ctr);
                     ctr = inc_be(ctr);
@@ -126,16 +122,16 @@ macro_rules! impl_ctr {
             }
         }
 
-        impl FromBlockCipher for $name {
-            type BlockCipher = $cipher;
-            type NonceSize = <$cipher as BlockCipher>::BlockSize;
+        impl NewStreamCipher for $name {
+            type KeySize = <$cipher as BlockCipher>::KeySize;
+            type NonceSize = U16;
 
-            fn from_block_cipher(
-                cipher: $cipher,
+            fn new(
+                key: &GenericArray<u8, Self::KeySize>,
                 nonce: &GenericArray<u8, Self::NonceSize>,
             ) -> Self {
                 let nonce = swap_bytes(load(nonce));
-
+                let cipher = <$cipher>::new(key);
                 Self {
                     nonce,
                     ctr: nonce,
@@ -235,7 +231,7 @@ macro_rules! impl_ctr {
             }
         }
 
-        opaque_debug::implement!($name);
+        impl_opaque_debug!($name);
     }
 }
 

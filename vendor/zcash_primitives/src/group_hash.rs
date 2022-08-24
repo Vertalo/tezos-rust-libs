@@ -2,8 +2,9 @@
 //!
 //! [grouphash]: https://zips.z.cash/protocol/protocol.pdf#concretegrouphashjubjub
 
+use crate::jubjub::{edwards, JubjubEngine, PrimeOrder};
+
 use ff::PrimeField;
-use group::{cofactor::CofactorGroup, Group, GroupEncoding};
 
 use crate::constants;
 use blake2s_simd::Params;
@@ -11,11 +12,15 @@ use blake2s_simd::Params;
 /// Produces a random point in the Jubjub curve.
 /// The point is guaranteed to be prime order
 /// and not the identity.
-pub fn group_hash(tag: &[u8], personalization: &[u8]) -> Option<jubjub::SubgroupPoint> {
+pub fn group_hash<E: JubjubEngine>(
+    tag: &[u8],
+    personalization: &[u8],
+    params: &E::Params,
+) -> Option<edwards::Point<E, PrimeOrder>> {
     assert_eq!(personalization.len(), 8);
 
     // Check to see that scalar field is 255 bits
-    assert!(bls12_381::Scalar::NUM_BITS == 255);
+    assert!(E::Fr::NUM_BITS == 255);
 
     let h = Params::new()
         .hash_length(32)
@@ -25,18 +30,16 @@ pub fn group_hash(tag: &[u8], personalization: &[u8]) -> Option<jubjub::Subgroup
         .update(tag)
         .finalize();
 
-    let p = jubjub::ExtendedPoint::from_bytes(h.as_array());
-    if p.is_some().into() {
-        // <ExtendedPoint as CofactorGroup>::clear_cofactor is implemented using
-        // ExtendedPoint::mul_by_cofactor in the jubjub crate.
-        let p = CofactorGroup::clear_cofactor(&p.unwrap());
+    match edwards::Point::<E, _>::read(h.as_ref(), params) {
+        Ok(p) => {
+            let p = p.mul_by_cofactor(params);
 
-        if p.is_identity().into() {
-            None
-        } else {
-            Some(p)
+            if p != edwards::Point::zero() {
+                Some(p)
+            } else {
+                None
+            }
         }
-    } else {
-        None
+        Err(_) => None,
     }
 }

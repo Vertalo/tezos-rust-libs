@@ -1,36 +1,32 @@
-use super::{FixedOutput, Reset, Update};
+use super::{Input, FixedOutput, Reset};
+use generic_array::{GenericArray, ArrayLength};
 use generic_array::typenum::Unsigned;
-use generic_array::{ArrayLength, GenericArray};
 
 /// The `Digest` trait specifies an interface common for digest functions.
 ///
-/// It's a convenience wrapper around [`Update`], [`FixedOutput`], [`Reset`],
-/// [`Clone`], and [`Default`] traits. It also provides additional convenience methods.
+/// It's a convenience wrapper around `Input`, `FixedOutput`, `Reset`, `Clone`,
+/// and `Default` traits. It also provides additional convenience methods.
 pub trait Digest {
-    /// Output size for `Digest`
     type OutputSize: ArrayLength<u8>;
-
     /// Create new hasher instance
     fn new() -> Self;
 
-    /// Digest data, updating the internal state.
+    /// Digest input data.
     ///
     /// This method can be called repeatedly for use with streaming messages.
-    fn update(&mut self, data: impl AsRef<[u8]>);
+    fn input<B: AsRef<[u8]>>(&mut self, data: B);
 
     /// Digest input data in a chained manner.
-    fn chain(self, data: impl AsRef<[u8]>) -> Self
-    where
-        Self: Sized;
+    fn chain<B: AsRef<[u8]>>(self, data: B) -> Self where Self: Sized;
 
     /// Retrieve result and consume hasher instance.
-    fn finalize(self) -> Output<Self>;
+    fn result(self) -> GenericArray<u8, Self::OutputSize>;
 
     /// Retrieve result and reset hasher instance.
     ///
     /// This method sometimes can be more efficient compared to hasher
     /// re-creation.
-    fn finalize_reset(&mut self) -> Output<Self>;
+    fn result_reset(&mut self) -> GenericArray<u8, Self::OutputSize>;
 
     /// Reset hasher instance to its initial state.
     fn reset(&mut self);
@@ -46,33 +42,30 @@ pub trait Digest {
     /// ```rust,ignore
     /// println!("{:x}", sha2::Sha256::digest(b"Hello world"));
     /// ```
-    fn digest(data: &[u8]) -> Output<Self>;
+    fn digest(data: &[u8]) -> GenericArray<u8, Self::OutputSize>;
 }
 
-impl<D: Update + FixedOutput + Reset + Clone + Default> Digest for D {
+impl<D: Input + FixedOutput + Reset + Clone + Default> Digest for D {
     type OutputSize = <Self as FixedOutput>::OutputSize;
 
     fn new() -> Self {
         Self::default()
     }
 
-    fn update(&mut self, data: impl AsRef<[u8]>) {
-        Update::update(self, data);
+    fn input<B: AsRef<[u8]>>(&mut self, data: B) {
+        Input::input(self, data);
     }
 
-    fn chain(self, data: impl AsRef<[u8]>) -> Self
-    where
-        Self: Sized,
-    {
-        Update::chain(self, data)
+    fn chain<B: AsRef<[u8]>>(self, data: B) -> Self where Self: Sized {
+        Input::chain(self, data)
     }
 
-    fn finalize(self) -> Output<Self> {
-        self.finalize_fixed()
+    fn result(self) -> GenericArray<u8, Self::OutputSize> {
+        self.fixed_result()
     }
 
-    fn finalize_reset(&mut self) -> Output<Self> {
-        let res = self.clone().finalize_fixed();
+    fn result_reset(&mut self) -> GenericArray<u8, Self::OutputSize> {
+        let res = self.clone().fixed_result();
         self.reset();
         res
     }
@@ -85,12 +78,9 @@ impl<D: Update + FixedOutput + Reset + Clone + Default> Digest for D {
         Self::OutputSize::to_usize()
     }
 
-    fn digest(data: &[u8]) -> Output<Self> {
+    fn digest(data: &[u8]) -> GenericArray<u8, Self::OutputSize> {
         let mut hasher = Self::default();
-        Update::update(&mut hasher, data);
-        hasher.finalize_fixed()
+        Input::input(&mut hasher, data);
+        hasher.fixed_result()
     }
 }
-
-/// Output of a [`Digest`] function
-pub type Output<D> = GenericArray<u8, <D as Digest>::OutputSize>;

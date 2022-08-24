@@ -7,13 +7,13 @@ use std::time::{Duration, Instant};
 
 use crossbeam_utils::Backoff;
 
-use crate::channel::{self, Receiver, Sender};
-use crate::context::Context;
-use crate::err::{ReadyTimeoutError, TryReadyError};
-use crate::err::{RecvError, SendError};
-use crate::err::{SelectTimeoutError, TrySelectError};
-use crate::flavors;
-use crate::utils;
+use channel::{self, Receiver, Sender};
+use context::Context;
+use err::{ReadyTimeoutError, TryReadyError};
+use err::{RecvError, SendError};
+use err::{SelectTimeoutError, TrySelectError};
+use flavors;
+use utils;
 
 /// Temporary data that gets initialized during select or a blocking operation, and is consumed by
 /// `read` or `write`.
@@ -21,7 +21,7 @@ use crate::utils;
 /// Each field contains data associated with a specific channel flavor.
 #[derive(Debug, Default)]
 pub struct Token {
-    pub at: flavors::at::AtToken,
+    pub after: flavors::after::AfterToken,
     pub array: flavors::array::ArrayToken,
     pub list: flavors::list::ListToken,
     pub never: flavors::never::NeverToken,
@@ -119,7 +119,7 @@ pub trait SelectHandle {
     fn unwatch(&self, oper: Operation);
 }
 
-impl<T: SelectHandle> SelectHandle for &T {
+impl<'a, T: SelectHandle> SelectHandle for &'a T {
     fn try_select(&self, token: &mut Token) -> bool {
         (**self).try_select(token)
     }
@@ -481,16 +481,9 @@ pub fn select_timeout<'a>(
     handles: &mut [(&'a dyn SelectHandle, usize, *const u8)],
     timeout: Duration,
 ) -> Result<SelectedOperation<'a>, SelectTimeoutError> {
-    select_deadline(handles, Instant::now() + timeout)
-}
+    let timeout = Timeout::At(Instant::now() + timeout);
 
-/// Blocks until a given deadline, or until one of the operations becomes ready and selects it.
-#[inline]
-pub fn select_deadline<'a>(
-    handles: &mut [(&'a dyn SelectHandle, usize, *const u8)],
-    deadline: Instant,
-) -> Result<SelectedOperation<'a>, SelectTimeoutError> {
-    match run_select(handles, Timeout::At(deadline)) {
+    match run_select(handles, timeout) {
         None => Err(SelectTimeoutError),
         Some((token, index, ptr)) => Ok(SelectedOperation {
             token,
@@ -577,12 +570,13 @@ pub fn select_deadline<'a>(
 /// }
 /// ```
 ///
-/// [`try_select`]: Select::try_select
-/// [`select`]: Select::select
-/// [`select_timeout`]: Select::select_timeout
-/// [`try_ready`]: Select::try_ready
-/// [`ready`]: Select::ready
-/// [`ready_timeout`]: Select::ready_timeout
+/// [`select!`]: macro.select.html
+/// [`try_select`]: struct.Select.html#method.try_select
+/// [`select`]: struct.Select.html#method.select
+/// [`select_timeout`]: struct.Select.html#method.select_timeout
+/// [`try_ready`]: struct.Select.html#method.try_ready
+/// [`ready`]: struct.Select.html#method.ready
+/// [`ready_timeout`]: struct.Select.html#method.ready_timeout
 pub struct Select<'a> {
     /// A list of senders and receivers participating in selection.
     handles: Vec<(&'a dyn SelectHandle, usize, *const u8)>,
@@ -591,8 +585,8 @@ pub struct Select<'a> {
     next_index: usize,
 }
 
-unsafe impl Send for Select<'_> {}
-unsafe impl Sync for Select<'_> {}
+unsafe impl<'a> Send for Select<'a> {}
+unsafe impl<'a> Sync for Select<'a> {}
 
 impl<'a> Select<'a> {
     /// Creates an empty list of channel operations for selection.
@@ -621,6 +615,7 @@ impl<'a> Select<'a> {
     /// # Examples
     ///
     /// ```
+    /// use std::thread;
     /// use crossbeam_channel::{unbounded, Select};
     ///
     /// let (s, r) = unbounded::<i32>();
@@ -643,6 +638,7 @@ impl<'a> Select<'a> {
     /// # Examples
     ///
     /// ```
+    /// use std::thread;
     /// use crossbeam_channel::{unbounded, Select};
     ///
     /// let (s, r) = unbounded::<i32>();
@@ -673,6 +669,7 @@ impl<'a> Select<'a> {
     /// # Examples
     ///
     /// ```
+    /// use std::thread;
     /// use crossbeam_channel::{unbounded, Select};
     ///
     /// let (s1, r1) = unbounded::<i32>();
@@ -725,9 +722,13 @@ impl<'a> Select<'a> {
     /// The selected operation must be completed with [`SelectedOperation::send`]
     /// or [`SelectedOperation::recv`].
     ///
+    /// [`SelectedOperation::send`]: struct.SelectedOperation.html#method.send
+    /// [`SelectedOperation::recv`]: struct.SelectedOperation.html#method.recv
+    ///
     /// # Examples
     ///
     /// ```
+    /// use std::thread;
     /// use crossbeam_channel::{unbounded, Select};
     ///
     /// let (s1, r1) = unbounded();
@@ -765,6 +766,9 @@ impl<'a> Select<'a> {
     ///
     /// The selected operation must be completed with [`SelectedOperation::send`]
     /// or [`SelectedOperation::recv`].
+    ///
+    /// [`SelectedOperation::send`]: struct.SelectedOperation.html#method.send
+    /// [`SelectedOperation::recv`]: struct.SelectedOperation.html#method.recv
     ///
     /// # Panics
     ///
@@ -814,6 +818,9 @@ impl<'a> Select<'a> {
     /// The selected operation must be completed with [`SelectedOperation::send`]
     /// or [`SelectedOperation::recv`].
     ///
+    /// [`SelectedOperation::send`]: struct.SelectedOperation.html#method.send
+    /// [`SelectedOperation::recv`]: struct.SelectedOperation.html#method.recv
+    ///
     /// # Examples
     ///
     /// ```
@@ -852,61 +859,6 @@ impl<'a> Select<'a> {
         select_timeout(&mut self.handles, timeout)
     }
 
-    /// Blocks until a given deadline, or until one of the operations becomes ready and selects it.
-    ///
-    /// If an operation becomes ready, it is selected and returned. If multiple operations are
-    /// ready at the same time, a random one among them is selected. If none of the operations
-    /// become ready before the given deadline, an error is returned.
-    ///
-    /// An operation is considered to be ready if it doesn't have to block. Note that it is ready
-    /// even when it will simply return an error because the channel is disconnected.
-    ///
-    /// The selected operation must be completed with [`SelectedOperation::send`]
-    /// or [`SelectedOperation::recv`].
-    ///
-    /// [`SelectedOperation::send`]: struct.SelectedOperation.html#method.send
-    /// [`SelectedOperation::recv`]: struct.SelectedOperation.html#method.recv
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use std::thread;
-    /// use std::time::{Instant, Duration};
-    /// use crossbeam_channel::{unbounded, Select};
-    ///
-    /// let (s1, r1) = unbounded();
-    /// let (s2, r2) = unbounded();
-    ///
-    /// thread::spawn(move || {
-    ///     thread::sleep(Duration::from_secs(1));
-    ///     s1.send(10).unwrap();
-    /// });
-    /// thread::spawn(move || s2.send(20).unwrap());
-    ///
-    /// let mut sel = Select::new();
-    /// let oper1 = sel.recv(&r1);
-    /// let oper2 = sel.recv(&r2);
-    ///
-    /// let deadline = Instant::now() + Duration::from_millis(500);
-    ///
-    /// // The second operation will be selected because it becomes ready first.
-    /// let oper = sel.select_deadline(deadline);
-    /// match oper {
-    ///     Err(_) => panic!("should not have timed out"),
-    ///     Ok(oper) => match oper.index() {
-    ///         i if i == oper1 => assert_eq!(oper.recv(&r1), Ok(10)),
-    ///         i if i == oper2 => assert_eq!(oper.recv(&r2), Ok(20)),
-    ///         _ => unreachable!(),
-    ///     }
-    /// }
-    /// ```
-    pub fn select_deadline(
-        &mut self,
-        deadline: Instant,
-    ) -> Result<SelectedOperation<'a>, SelectTimeoutError> {
-        select_deadline(&mut self.handles, deadline)
-    }
-
     /// Attempts to find a ready operation without blocking.
     ///
     /// If an operation is ready, its index is returned. If multiple operations are ready at the
@@ -922,6 +874,7 @@ impl<'a> Select<'a> {
     /// # Examples
     ///
     /// ```
+    /// use std::thread;
     /// use crossbeam_channel::{unbounded, Select};
     ///
     /// let (s1, r1) = unbounded();
@@ -1040,53 +993,9 @@ impl<'a> Select<'a> {
     /// }
     /// ```
     pub fn ready_timeout(&mut self, timeout: Duration) -> Result<usize, ReadyTimeoutError> {
-        self.ready_deadline(Instant::now() + timeout)
-    }
+        let timeout = Timeout::At(Instant::now() + timeout);
 
-    /// Blocks until a given deadline, or until one of the operations becomes ready.
-    ///
-    /// If an operation becomes ready, its index is returned. If multiple operations are ready at
-    /// the same time, a random one among them is chosen. If none of the operations become ready
-    /// before the deadline, an error is returned.
-    ///
-    /// An operation is considered to be ready if it doesn't have to block. Note that it is ready
-    /// even when it will simply return an error because the channel is disconnected.
-    ///
-    /// Note that this method might return with success spuriously, so it's a good idea to double
-    /// check if the operation is really ready.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use std::thread;
-    /// use std::time::{Duration, Instant};
-    /// use crossbeam_channel::{unbounded, Select};
-    ///
-    /// let deadline = Instant::now() + Duration::from_millis(500);
-    ///
-    /// let (s1, r1) = unbounded();
-    /// let (s2, r2) = unbounded();
-    ///
-    /// thread::spawn(move || {
-    ///     thread::sleep(Duration::from_secs(1));
-    ///     s1.send(10).unwrap();
-    /// });
-    /// thread::spawn(move || s2.send(20).unwrap());
-    ///
-    /// let mut sel = Select::new();
-    /// let oper1 = sel.recv(&r1);
-    /// let oper2 = sel.recv(&r2);
-    ///
-    /// // The second operation will be selected because it becomes ready first.
-    /// match sel.ready_deadline(deadline) {
-    ///     Err(_) => panic!("should not have timed out"),
-    ///     Ok(i) if i == oper1 => assert_eq!(r1.try_recv(), Ok(10)),
-    ///     Ok(i) if i == oper2 => assert_eq!(r2.try_recv(), Ok(20)),
-    ///     Ok(_) => unreachable!(),
-    /// }
-    /// ```
-    pub fn ready_deadline(&mut self, deadline: Instant) -> Result<usize, ReadyTimeoutError> {
-        match run_ready(&mut self.handles, Timeout::At(deadline)) {
+        match run_ready(&mut self.handles, timeout) {
             None => Err(ReadyTimeoutError),
             Some(index) => Ok(index),
         }
@@ -1108,8 +1017,8 @@ impl<'a> Default for Select<'a> {
     }
 }
 
-impl fmt::Debug for Select<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl<'a> fmt::Debug for Select<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.pad("Select { .. }")
     }
 }
@@ -1123,8 +1032,8 @@ impl fmt::Debug for Select<'_> {
 /// Forgetting to complete the operation is an error and might lead to deadlocks. If a
 /// `SelectedOperation` is dropped without completion, a panic occurs.
 ///
-/// [`send`]: SelectedOperation::send
-/// [`recv`]: SelectedOperation::recv
+/// [`send`]: struct.SelectedOperation.html#method.send
+/// [`recv`]: struct.SelectedOperation.html#method.recv
 #[must_use]
 pub struct SelectedOperation<'a> {
     /// Token needed to complete the operation.
@@ -1140,7 +1049,7 @@ pub struct SelectedOperation<'a> {
     _marker: PhantomData<&'a ()>,
 }
 
-impl SelectedOperation<'_> {
+impl<'a> SelectedOperation<'a> {
     /// Returns the index of the selected operation.
     ///
     /// # Examples
@@ -1193,6 +1102,9 @@ impl SelectedOperation<'_> {
     /// assert_eq!(oper.index(), oper1);
     /// assert_eq!(oper.send(&s, 10), Err(SendError(10)));
     /// ```
+    ///
+    /// [`Sender`]: struct.Sender.html
+    /// [`Select::send`]: struct.Select.html#method.send
     pub fn send<T>(mut self, s: &Sender<T>, msg: T) -> Result<(), SendError<T>> {
         assert!(
             s as *const Sender<T> as *const u8 == self.ptr,
@@ -1227,6 +1139,9 @@ impl SelectedOperation<'_> {
     /// assert_eq!(oper.index(), oper1);
     /// assert_eq!(oper.recv(&r), Err(RecvError));
     /// ```
+    ///
+    /// [`Receiver`]: struct.Receiver.html
+    /// [`Select::recv`]: struct.Select.html#method.recv
     pub fn recv<T>(mut self, r: &Receiver<T>) -> Result<T, RecvError> {
         assert!(
             r as *const Receiver<T> as *const u8 == self.ptr,
@@ -1238,13 +1153,13 @@ impl SelectedOperation<'_> {
     }
 }
 
-impl fmt::Debug for SelectedOperation<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl<'a> fmt::Debug for SelectedOperation<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.pad("SelectedOperation { .. }")
     }
 }
 
-impl Drop for SelectedOperation<'_> {
+impl<'a> Drop for SelectedOperation<'a> {
     fn drop(&mut self) {
         panic!("dropped `SelectedOperation` without completing the operation");
     }

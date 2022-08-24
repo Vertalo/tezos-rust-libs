@@ -4,9 +4,8 @@ use super::ecc::{EdwardsPoint, MontgomeryPoint};
 use bellman::gadgets::boolean::Boolean;
 use bellman::gadgets::lookup::*;
 use bellman::{ConstraintSystem, SynthesisError};
+use zcash_primitives::jubjub::*;
 pub use zcash_primitives::pedersen_hash::Personalization;
-
-use crate::constants::PEDERSEN_CIRCUIT_GENERATORS;
 
 fn get_constant_bools(person: &Personalization) -> Vec<Boolean> {
     person
@@ -16,20 +15,21 @@ fn get_constant_bools(person: &Personalization) -> Vec<Boolean> {
         .collect()
 }
 
-pub fn pedersen_hash<CS>(
+pub fn pedersen_hash<E: JubjubEngine, CS>(
     mut cs: CS,
     personalization: Personalization,
     bits: &[Boolean],
-) -> Result<EdwardsPoint, SynthesisError>
+    params: &E::Params,
+) -> Result<EdwardsPoint<E>, SynthesisError>
 where
-    CS: ConstraintSystem<bls12_381::Scalar>,
+    CS: ConstraintSystem<E>,
 {
     let personalization = get_constant_bools(&personalization);
     assert_eq!(personalization.len(), 6);
 
     let mut edwards_result = None;
     let mut bits = personalization.iter().chain(bits.iter()).peekable();
-    let mut segment_generators = PEDERSEN_CIRCUIT_GENERATORS.iter();
+    let mut segment_generators = params.pedersen_circuit_generators().iter();
     let boolean_false = Boolean::constant(false);
 
     let mut segment_i = 0;
@@ -60,6 +60,7 @@ where
                             format!("addition of segment {}, window {}", segment_i, window_i)
                         }),
                         segment_result,
+                        params,
                     )?;
                 }
             }
@@ -82,6 +83,7 @@ where
         // Convert this segment into twisted Edwards form.
         let segment_result = segment_result.into_edwards(
             cs.namespace(|| format!("conversion of segment {} into edwards", segment_i)),
+            params,
         )?;
 
         match edwards_result {
@@ -89,6 +91,7 @@ where
                 *edwards_result = segment_result.add(
                     cs.namespace(|| format!("addition of segment {} to accumulator", segment_i)),
                     edwards_result,
+                    params,
                 )?;
             }
             None => {
@@ -108,7 +111,7 @@ mod test {
     use bellman::gadgets::boolean::{AllocatedBit, Boolean};
     use bellman::gadgets::test::*;
     use ff::PrimeField;
-    use group::Curve;
+    use pairing::bls12_381::{Bls12, Fr};
     use rand_core::{RngCore, SeedableRng};
     use rand_xorshift::XorShiftRng;
     use zcash_primitives::pedersen_hash;
@@ -144,6 +147,7 @@ mod test {
             0x59, 0x62, 0xbe, 0x3d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06,
             0xbc, 0xe5,
         ]);
+        let params = &JubjubBls12::new();
 
         let leaves_len = 2 * 255;
         let note_len = 64 + 256 + 256;
@@ -158,7 +162,7 @@ mod test {
         ]
         .iter()
         {
-            let mut cs = TestConstraintSystem::new();
+            let mut cs = TestConstraintSystem::<Bls12>::new();
 
             let input: Vec<bool> = (0..n_bits).map(|_| rng.next_u32() % 2 != 0).collect();
 
@@ -177,6 +181,7 @@ mod test {
                 cs.namespace(|| "pedersen hash"),
                 Personalization::NoteCommitment,
                 &input_bools,
+                params,
             )
             .unwrap();
 
@@ -201,12 +206,13 @@ mod test {
             0x59, 0x62, 0xbe, 0x3d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06,
             0xbc, 0xe5,
         ]);
+        let params = &JubjubBls12::new();
 
         for length in 0..751 {
             for _ in 0..5 {
                 let input: Vec<bool> = (0..length).map(|_| rng.next_u32() % 2 != 0).collect();
 
-                let mut cs = TestConstraintSystem::new();
+                let mut cs = TestConstraintSystem::<Bls12>::new();
 
                 let input_bools: Vec<Boolean> = input
                     .iter()
@@ -223,29 +229,32 @@ mod test {
                     cs.namespace(|| "pedersen hash"),
                     Personalization::MerkleTree(1),
                     &input_bools,
+                    params,
                 )
                 .unwrap();
 
                 assert!(cs.is_satisfied());
 
-                let expected = jubjub::ExtendedPoint::from(pedersen_hash::pedersen_hash(
+                let expected = pedersen_hash::pedersen_hash::<Bls12, _>(
                     Personalization::MerkleTree(1),
                     input.clone().into_iter(),
-                ))
-                .to_affine();
+                    params,
+                )
+                .to_xy();
 
-                assert_eq!(res.get_u().get_value().unwrap(), expected.get_u());
-                assert_eq!(res.get_v().get_value().unwrap(), expected.get_v());
+                assert_eq!(res.get_x().get_value().unwrap(), expected.0);
+                assert_eq!(res.get_y().get_value().unwrap(), expected.1);
 
                 // Test against the output of a different personalization
-                let unexpected = jubjub::ExtendedPoint::from(pedersen_hash::pedersen_hash(
+                let unexpected = pedersen_hash::pedersen_hash::<Bls12, _>(
                     Personalization::MerkleTree(0),
                     input.into_iter(),
-                ))
-                .to_affine();
+                    params,
+                )
+                .to_xy();
 
-                assert!(res.get_u().get_value().unwrap() != unexpected.get_u());
-                assert!(res.get_v().get_value().unwrap() != unexpected.get_v());
+                assert!(res.get_x().get_value().unwrap() != unexpected.0);
+                assert!(res.get_y().get_value().unwrap() != unexpected.1);
             }
         }
     }
@@ -256,19 +265,20 @@ mod test {
             0x59, 0x62, 0xbe, 0x3d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06,
             0xbc, 0xe5,
         ]);
+        let params = &JubjubBls12::new();
 
-        let expected_us = [
+        let expected_xs = [
             "28161926966428986673895580777285905189725480206811328272001879986576840909576",
             "39669831794597628158501766225645040955899576179071014703006420393381978263045",
         ];
-        let expected_vs = [
+        let expected_ys = [
             "26869991781071974894722407757894142583682396277979904369818887810555917099932",
             "2112827187110048608327330788910224944044097981650120385961435904443901436107",
         ];
         for length in 300..302 {
             let input: Vec<bool> = (0..length).map(|_| rng.next_u32() % 2 != 0).collect();
 
-            let mut cs = TestConstraintSystem::new();
+            let mut cs = TestConstraintSystem::<Bls12>::new();
 
             let input_bools: Vec<Boolean> = input
                 .iter()
@@ -285,18 +295,19 @@ mod test {
                 cs.namespace(|| "pedersen hash"),
                 Personalization::MerkleTree(1),
                 &input_bools,
+                params,
             )
             .unwrap();
 
             assert!(cs.is_satisfied());
 
             assert_eq!(
-                res.get_u().get_value().unwrap(),
-                bls12_381::Scalar::from_str(expected_us[length - 300]).unwrap()
+                res.get_x().get_value().unwrap(),
+                Fr::from_str(expected_xs[length - 300]).unwrap()
             );
             assert_eq!(
-                res.get_v().get_value().unwrap(),
-                bls12_381::Scalar::from_str(expected_vs[length - 300]).unwrap()
+                res.get_y().get_value().unwrap(),
+                Fr::from_str(expected_ys[length - 300]).unwrap()
             );
         }
     }

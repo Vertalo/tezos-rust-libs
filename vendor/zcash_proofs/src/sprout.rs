@@ -4,7 +4,7 @@ use bellman::{
     gadgets::multipack,
     groth16::{self, create_random_proof, Parameters, PreparedVerifyingKey, Proof},
 };
-use bls12_381::Bls12;
+use pairing::bls12_381::Bls12;
 use rand_core::OsRng;
 
 use crate::circuit::sprout::*;
@@ -161,7 +161,7 @@ pub fn verify_proof(
     public_input.extend(&vpub_new.to_le_bytes());
 
     let public_input = multipack::bytes_to_bits(&public_input);
-    let public_input = multipack::compute_multipacking(&public_input);
+    let public_input = multipack::compute_multipacking::<Bls12>(&public_input);
 
     let proof = match Proof::read(&proof[..]) {
         Ok(p) => p,
@@ -169,5 +169,11 @@ pub fn verify_proof(
     };
 
     // Verify the proof
-    groth16::verify_proof(verifying_key, &proof, &public_input[..]).is_ok()
+    match groth16::verify_proof(verifying_key, &proof, &public_input[..]) {
+        // No error, and proof verification successful
+        Ok(true) => true,
+
+        // Any other case
+        _ => false,
+    }
 }

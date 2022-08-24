@@ -1,9 +1,8 @@
 //! Useful traits for manipulating sequences of data stored in `GenericArray`s
 
 use super::*;
+use core::{mem, ptr};
 use core::ops::{Add, Sub};
-use core::mem::MaybeUninit;
-use core::ptr;
 use typenum::operator_aliases::*;
 
 /// Defines some sequence with an associated length and iteration capabilities.
@@ -42,15 +41,17 @@ pub unsafe trait GenericSequence<T>: Sized + IntoIterator {
 
             let (left_array_iter, left_position) = left.iter_position();
 
-            FromIterator::from_iter(left_array_iter.zip(self.into_iter()).map(
-                |(l, right_value)| {
+            FromIterator::from_iter(
+                left_array_iter
+                    .zip(self.into_iter())
+                    .map(|(l, right_value)| {
                         let left_value = ptr::read(l);
 
                         *left_position += 1;
 
                         f(left_value, right_value)
-                },
-            ))
+                    })
+            )
         }
     }
 
@@ -116,15 +117,12 @@ pub unsafe trait Lengthen<T>: Sized + GenericSequence<T> {
     ///
     /// Example:
     ///
-    /// ```rust
-    /// # use generic_array::{arr, sequence::Lengthen};
-    /// # fn main() {
+    /// ```ignore
     /// let a = arr![i32; 1, 2, 3];
     ///
     /// let b = a.append(4);
     ///
     /// assert_eq!(b, arr![i32; 1, 2, 3, 4]);
-    /// # }
     /// ```
     fn append(self, last: T) -> Self::Longer;
 
@@ -132,15 +130,12 @@ pub unsafe trait Lengthen<T>: Sized + GenericSequence<T> {
     ///
     /// Example:
     ///
-    /// ```rust
-    /// # use generic_array::{arr, sequence::Lengthen};
-    /// # fn main() {
+    /// ```ignore
     /// let a = arr![i32; 1, 2, 3];
     ///
     /// let b = a.prepend(4);
     ///
     /// assert_eq!(b, arr![i32; 4, 1, 2, 3]);
-    /// # }
     /// ```
     fn prepend(self, first: T) -> Self::Longer;
 }
@@ -157,32 +152,26 @@ pub unsafe trait Shorten<T>: Sized + GenericSequence<T> {
     ///
     /// Example:
     ///
-    /// ```rust
-    /// # use generic_array::{arr, sequence::Shorten};
-    /// # fn main() {
+    /// ```ignore
     /// let a = arr![i32; 1, 2, 3, 4];
     ///
     /// let (init, last) = a.pop_back();
     ///
     /// assert_eq!(init, arr![i32; 1, 2, 3]);
     /// assert_eq!(last, 4);
-    /// # }
     /// ```
     fn pop_back(self) -> (Self::Shorter, T);
 
     /// Returns a new array without the first element, and the first element.
     /// Example:
     ///
-    /// ```rust
-    /// # use generic_array::{arr, sequence::Shorten};
-    /// # fn main() {
+    /// ```ignore
     /// let a = arr![i32; 1, 2, 3, 4];
     ///
     /// let (head, tail) = a.pop_front();
     ///
     /// assert_eq!(head, 1);
     /// assert_eq!(tail, arr![i32; 2, 3, 4]);
-    /// # }
     /// ```
     fn pop_front(self) -> (T, Self::Shorter);
 }
@@ -197,35 +186,27 @@ where
     type Longer = GenericArray<T, Add1<N>>;
 
     fn append(self, last: T) -> Self::Longer {
-        let mut longer: MaybeUninit<Self::Longer> = MaybeUninit::uninit();
-
-        // Note this is *mut Self, so add(1) increments by the whole array
-        let out_ptr = longer.as_mut_ptr() as *mut Self;
+        let mut longer: Self::Longer = unsafe { mem::uninitialized() };
 
         unsafe {
-            // write self first
-            ptr::write(out_ptr, self);
-            // increment past self, then write the last
-            ptr::write(out_ptr.add(1) as *mut T, last);
-
-            longer.assume_init()
+            ptr::write(longer.as_mut_ptr() as *mut _, self);
+            ptr::write(&mut longer[N::to_usize()], last);
         }
+
+        longer
     }
 
     fn prepend(self, first: T) -> Self::Longer {
-        let mut longer: MaybeUninit<Self::Longer> = MaybeUninit::uninit();
+        let mut longer: Self::Longer = unsafe { mem::uninitialized() };
 
-        // Note this is *mut T, so add(1) increments by a single T
-        let out_ptr = longer.as_mut_ptr() as *mut T;
+        let longer_ptr = longer.as_mut_ptr();
 
         unsafe {
-            // write the first at the start
-            ptr::write(out_ptr, first);
-            // increment past the first, then write self
-            ptr::write(out_ptr.add(1) as *mut Self, self);
-
-            longer.assume_init()
+            ptr::write(longer_ptr as *mut _, first);
+            ptr::write(longer_ptr.offset(1) as *mut _, self);
         }
+
+        longer
     }
 }
 
@@ -239,26 +220,27 @@ where
     type Shorter = GenericArray<T, Sub1<N>>;
 
     fn pop_back(self) -> (Self::Shorter, T) {
-        let whole = ManuallyDrop::new(self);
+        let init_ptr = self.as_ptr();
+        let last_ptr = unsafe { init_ptr.offset(Sub1::<N>::to_usize() as isize) };
 
-        unsafe {
-            let init = ptr::read(whole.as_ptr() as _);
-            let last = ptr::read(whole.as_ptr().add(Sub1::<N>::USIZE) as _);
+        let init = unsafe { ptr::read(init_ptr as _) };
+        let last = unsafe { ptr::read(last_ptr as _) };
 
-            (init, last)
-        }
+        mem::forget(self);
+
+        (init, last)
     }
 
     fn pop_front(self) -> (T, Self::Shorter) {
-        // ensure this doesn't get dropped
-        let whole = ManuallyDrop::new(self);
+        let head_ptr = self.as_ptr();
+        let tail_ptr = unsafe { head_ptr.offset(1) };
 
-        unsafe {
-            let head = ptr::read(whole.as_ptr() as _);
-            let tail = ptr::read(whole.as_ptr().offset(1) as _);
+        let head = unsafe { ptr::read(head_ptr as _) };
+        let tail = unsafe { ptr::read(tail_ptr as _) };
 
-            (head, tail)
-        }
+        mem::forget(self);
+
+        (head, tail)
     }
 }
 
@@ -287,55 +269,15 @@ where
     type Second = GenericArray<T, Diff<N, K>>;
 
     fn split(self) -> (Self::First, Self::Second) {
-        unsafe {
-            // ensure this doesn't get dropped
-            let whole = ManuallyDrop::new(self);
+        let head_ptr = self.as_ptr();
+        let tail_ptr = unsafe { head_ptr.offset(K::to_usize() as isize) };
 
-            let head = ptr::read(whole.as_ptr() as *const _);
-            let tail = ptr::read(whole.as_ptr().add(K::USIZE) as *const _);
+        let head = unsafe { ptr::read(head_ptr as _) };
+        let tail = unsafe { ptr::read(tail_ptr as _) };
 
-            (head, tail)
-        }
-    }
-}
+        mem::forget(self);
 
-unsafe impl<'a, T, N, K> Split<T, K> for &'a GenericArray<T, N>
-where
-    N: ArrayLength<T>,
-    K: ArrayLength<T> + 'static,
-    N: Sub<K>,
-    Diff<N, K>: ArrayLength<T>,
-{
-    type First = &'a GenericArray<T, K>;
-    type Second = &'a GenericArray<T, Diff<N, K>>;
-
-    fn split(self) -> (Self::First, Self::Second) {
-        unsafe {
-            let ptr_to_first: *const T = self.as_ptr();
-            let head = &*(ptr_to_first as *const _);
-            let tail = &*(ptr_to_first.add(K::USIZE) as *const _);
-            (head, tail)
-        }
-    }
-}
-
-unsafe impl<'a, T, N, K> Split<T, K> for &'a mut GenericArray<T, N>
-where
-    N: ArrayLength<T>,
-    K: ArrayLength<T> + 'static,
-    N: Sub<K>,
-    Diff<N, K>: ArrayLength<T>,
-{
-    type First = &'a mut GenericArray<T, K>;
-    type Second = &'a mut GenericArray<T, Diff<N, K>>;
-
-    fn split(self) -> (Self::First, Self::Second) {
-        unsafe {
-            let ptr_to_first: *mut T = self.as_mut_ptr();
-            let head = &mut *(ptr_to_first as *mut _);
-            let tail = &mut *(ptr_to_first.add(K::USIZE) as *mut _);
-            (head, tail)
-        }
+        (head, tail)
     }
 }
 
@@ -364,17 +306,15 @@ where
     type Output = GenericArray<T, Sum<N, M>>;
 
     fn concat(self, rest: Self::Rest) -> Self::Output {
-        let mut output: MaybeUninit<Self::Output> = MaybeUninit::uninit();
+        let mut output: Self::Output = unsafe { mem::uninitialized() };
 
-        let out_ptr = output.as_mut_ptr() as *mut Self;
+        let output_ptr = output.as_mut_ptr();
 
         unsafe {
-            // write all of self to the pointer
-            ptr::write(out_ptr, self);
-            // increment past self, then write the rest
-            ptr::write(out_ptr.add(1) as *mut _, rest);
-
-            output.assume_init()
+            ptr::write(output_ptr as *mut _, self);
+            ptr::write(output_ptr.offset(N::to_usize() as isize) as *mut _, rest);
         }
+
+        output
     }
 }

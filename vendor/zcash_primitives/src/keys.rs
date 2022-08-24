@@ -5,14 +5,12 @@
 //! [section 4.2.2]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
 
 use crate::{
-    constants::{PROOF_GENERATION_KEY_GENERATOR, SPENDING_KEY_GENERATOR},
+    jubjub::{edwards, FixedGenerators, JubjubEngine, JubjubParams, ToUniform, Unknown},
     primitives::{ProofGenerationKey, ViewingKey},
 };
 use blake2b_simd::{Hash as Blake2bHash, Params as Blake2bParams};
-use ff::PrimeField;
-use group::{Group, GroupEncoding};
+use ff::{PrimeField, PrimeFieldRepr};
 use std::io::{self, Read, Write};
-use subtle::CtOption;
 
 pub const PRF_EXPAND_PERSONALIZATION: &[u8; 16] = b"Zcash_ExpandSeed";
 
@@ -39,48 +37,50 @@ pub struct OutgoingViewingKey(pub [u8; 32]);
 
 /// A Sapling expanded spending key
 #[derive(Clone)]
-pub struct ExpandedSpendingKey {
-    pub ask: jubjub::Fr,
-    pub nsk: jubjub::Fr,
+pub struct ExpandedSpendingKey<E: JubjubEngine> {
+    pub ask: E::Fs,
+    pub nsk: E::Fs,
     pub ovk: OutgoingViewingKey,
 }
 
 /// A Sapling full viewing key
 #[derive(Debug)]
-pub struct FullViewingKey {
-    pub vk: ViewingKey,
+pub struct FullViewingKey<E: JubjubEngine> {
+    pub vk: ViewingKey<E>,
     pub ovk: OutgoingViewingKey,
 }
 
-impl ExpandedSpendingKey {
+impl<E: JubjubEngine> ExpandedSpendingKey<E> {
     pub fn from_spending_key(sk: &[u8]) -> Self {
-        let ask = jubjub::Fr::from_bytes_wide(prf_expand(sk, &[0x00]).as_array());
-        let nsk = jubjub::Fr::from_bytes_wide(prf_expand(sk, &[0x01]).as_array());
+        let ask = E::Fs::to_uniform(prf_expand(sk, &[0x00]).as_bytes());
+        let nsk = E::Fs::to_uniform(prf_expand(sk, &[0x01]).as_bytes());
         let mut ovk = OutgoingViewingKey([0u8; 32]);
         ovk.0
             .copy_from_slice(&prf_expand(sk, &[0x02]).as_bytes()[..32]);
         ExpandedSpendingKey { ask, nsk, ovk }
     }
 
-    pub fn proof_generation_key(&self) -> ProofGenerationKey {
+    pub fn proof_generation_key(&self, params: &E::Params) -> ProofGenerationKey<E> {
         ProofGenerationKey {
-            ak: SPENDING_KEY_GENERATOR * self.ask,
+            ak: params
+                .generator(FixedGenerators::SpendingKeyGenerator)
+                .mul(self.ask, params),
             nsk: self.nsk,
         }
     }
 
     pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
-        let mut ask_repr = [0u8; 32];
-        reader.read_exact(ask_repr.as_mut())?;
-        let ask = jubjub::Fr::from_repr(ask_repr)
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "ask not in field"))?;
+        let mut ask_repr = <E::Fs as PrimeField>::Repr::default();
+        ask_repr.read_le(&mut reader)?;
+        let ask = E::Fs::from_repr(ask_repr)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
-        let mut nsk_repr = [0u8; 32];
-        reader.read_exact(nsk_repr.as_mut())?;
-        let nsk = jubjub::Fr::from_repr(nsk_repr)
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "nsk not in field"))?;
+        let mut nsk_repr = <E::Fs as PrimeField>::Repr::default();
+        nsk_repr.read_le(&mut reader)?;
+        let nsk = E::Fs::from_repr(nsk_repr)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
-        let mut ovk = [0u8; 32];
+        let mut ovk = [0; 32];
         reader.read_exact(&mut ovk)?;
 
         Ok(ExpandedSpendingKey {
@@ -91,8 +91,8 @@ impl ExpandedSpendingKey {
     }
 
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        writer.write_all(self.ask.to_repr().as_ref())?;
-        writer.write_all(self.nsk.to_repr().as_ref())?;
+        self.ask.into_repr().write_le(&mut writer)?;
+        self.nsk.into_repr().write_le(&mut writer)?;
         writer.write_all(&self.ovk.0)?;
 
         Ok(())
@@ -106,7 +106,7 @@ impl ExpandedSpendingKey {
     }
 }
 
-impl Clone for FullViewingKey {
+impl<E: JubjubEngine> Clone for FullViewingKey<E> {
     fn clone(&self) -> Self {
         FullViewingKey {
             vk: ViewingKey {
@@ -118,44 +118,51 @@ impl Clone for FullViewingKey {
     }
 }
 
-impl FullViewingKey {
-    pub fn from_expanded_spending_key(expsk: &ExpandedSpendingKey) -> Self {
+impl<E: JubjubEngine> FullViewingKey<E> {
+    pub fn from_expanded_spending_key(expsk: &ExpandedSpendingKey<E>, params: &E::Params) -> Self {
         FullViewingKey {
             vk: ViewingKey {
-                ak: SPENDING_KEY_GENERATOR * expsk.ask,
-                nk: PROOF_GENERATION_KEY_GENERATOR * expsk.nsk,
+                ak: params
+                    .generator(FixedGenerators::SpendingKeyGenerator)
+                    .mul(expsk.ask, params),
+                nk: params
+                    .generator(FixedGenerators::ProofGenerationKey)
+                    .mul(expsk.nsk, params),
             },
             ovk: expsk.ovk,
         }
     }
 
-    pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
-        let ak = {
-            let mut buf = [0u8; 32];
-            reader.read_exact(&mut buf)?;
-            jubjub::SubgroupPoint::from_bytes(&buf).and_then(|p| CtOption::new(p, !p.is_identity()))
+    pub fn read<R: Read>(mut reader: R, params: &E::Params) -> io::Result<Self> {
+        let ak = edwards::Point::<E, Unknown>::read(&mut reader, params)?;
+        let ak = match ak.as_prime_order(params) {
+            Some(p) => p,
+            None => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "ak not in prime-order subgroup",
+                ));
+            }
         };
-        let nk = {
-            let mut buf = [0u8; 32];
-            reader.read_exact(&mut buf)?;
-            jubjub::SubgroupPoint::from_bytes(&buf)
-        };
-        if ak.is_none().into() {
+        if ak == edwards::Point::zero() {
             return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
+                io::ErrorKind::InvalidData,
                 "ak not of prime order",
             ));
         }
-        if nk.is_none().into() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "nk not in prime-order subgroup",
-            ));
-        }
-        let ak = ak.unwrap();
-        let nk = nk.unwrap();
 
-        let mut ovk = [0u8; 32];
+        let nk = edwards::Point::<E, Unknown>::read(&mut reader, params)?;
+        let nk = match nk.as_prime_order(params) {
+            Some(p) => p,
+            None => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "nk not in prime-order subgroup",
+                ));
+            }
+        };
+
+        let mut ovk = [0; 32];
         reader.read_exact(&mut ovk)?;
 
         Ok(FullViewingKey {
@@ -165,8 +172,8 @@ impl FullViewingKey {
     }
 
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        writer.write_all(&self.vk.ak.to_bytes())?;
-        writer.write_all(&self.vk.nk.to_bytes())?;
+        self.vk.ak.write(&mut writer)?;
+        self.vk.nk.write(&mut writer)?;
         writer.write_all(&self.ovk.0)?;
 
         Ok(())
@@ -182,31 +189,35 @@ impl FullViewingKey {
 
 #[cfg(test)]
 mod tests {
-    use group::{Group, GroupEncoding};
+    use crate::jubjub::{edwards, FixedGenerators, JubjubParams, PrimeOrder};
+    use pairing::bls12_381::Bls12;
+    use std::error::Error;
 
     use super::FullViewingKey;
-    use crate::constants::SPENDING_KEY_GENERATOR;
+    use crate::JUBJUB;
 
     #[test]
     fn ak_must_be_prime_order() {
         let mut buf = [0; 96];
-        let identity = jubjub::SubgroupPoint::identity();
+        let identity = edwards::Point::<Bls12, PrimeOrder>::zero();
 
         // Set both ak and nk to the identity.
-        buf[0..32].copy_from_slice(&identity.to_bytes());
-        buf[32..64].copy_from_slice(&identity.to_bytes());
+        identity.write(&mut buf[0..32]).unwrap();
+        identity.write(&mut buf[32..64]).unwrap();
 
         // ak is not allowed to be the identity.
         assert_eq!(
-            FullViewingKey::read(&buf[..]).unwrap_err().to_string(),
+            FullViewingKey::<Bls12>::read(&buf[..], &JUBJUB)
+                .unwrap_err()
+                .description(),
             "ak not of prime order"
         );
 
         // Set ak to a basepoint.
-        let basepoint = SPENDING_KEY_GENERATOR;
-        buf[0..32].copy_from_slice(&basepoint.to_bytes());
+        let basepoint = JUBJUB.generator(FixedGenerators::SpendingKeyGenerator);
+        basepoint.write(&mut buf[0..32]).unwrap();
 
         // nk is allowed to be the identity.
-        assert!(FullViewingKey::read(&buf[..]).is_ok());
+        assert!(FullViewingKey::<Bls12>::read(&buf[..], &JUBJUB).is_ok());
     }
 }

@@ -1,13 +1,7 @@
 //! Implementation of the Pedersen hash function used in Sapling.
 
-use byteorder::{ByteOrder, LittleEndian};
-use ff::PrimeField;
-use group::Group;
-use std::ops::{AddAssign, Neg};
-
-use crate::constants::{
-    PEDERSEN_HASH_CHUNKS_PER_GENERATOR, PEDERSEN_HASH_EXP_TABLE, PEDERSEN_HASH_EXP_WINDOW_SIZE,
-};
+use crate::jubjub::*;
+use ff::{Field, PrimeField, PrimeFieldRepr};
 
 #[derive(Copy, Clone)]
 pub enum Personalization {
@@ -28,22 +22,27 @@ impl Personalization {
     }
 }
 
-pub fn pedersen_hash<I>(personalization: Personalization, bits: I) -> jubjub::SubgroupPoint
+pub fn pedersen_hash<E, I>(
+    personalization: Personalization,
+    bits: I,
+    params: &E::Params,
+) -> edwards::Point<E, PrimeOrder>
 where
     I: IntoIterator<Item = bool>,
+    E: JubjubEngine,
 {
     let mut bits = personalization
         .get_bits()
         .into_iter()
         .chain(bits.into_iter());
 
-    let mut result = jubjub::SubgroupPoint::identity();
-    let mut generators = PEDERSEN_HASH_EXP_TABLE.iter();
+    let mut result = edwards::Point::zero();
+    let mut generators = params.pedersen_hash_exp_table().iter();
 
     loop {
-        let mut acc = jubjub::Fr::zero();
-        let mut cur = jubjub::Fr::one();
-        let mut chunks_remaining = PEDERSEN_HASH_CHUNKS_PER_GENERATOR;
+        let mut acc = E::Fs::zero();
+        let mut cur = E::Fs::one();
+        let mut chunks_remaining = params.pedersen_hash_chunks_per_generator();
         let mut encountered_bits = false;
 
         // Grab three bits from the input
@@ -58,14 +57,14 @@ where
             if a {
                 tmp.add_assign(&cur);
             }
-            cur = cur.double(); // 2^1 * cur
+            cur.double(); // 2^1 * cur
             if b {
                 tmp.add_assign(&cur);
             }
 
             // conditionally negate
             if c {
-                tmp = tmp.neg();
+                tmp.negate();
             }
 
             acc.add_assign(&tmp);
@@ -75,7 +74,9 @@ where
             if chunks_remaining == 0 {
                 break;
             } else {
-                cur = cur.double().double().double(); // 2^4 * cur
+                cur.double(); // 2^2 * cur
+                cur.double(); // 2^3 * cur
+                cur.double(); // 2^4 * cur
             }
         }
 
@@ -83,37 +84,25 @@ where
             break;
         }
 
-        let mut table: &[Vec<jubjub::SubgroupPoint>] =
+        let mut table: &[Vec<edwards::Point<E, _>>] =
             &generators.next().expect("we don't have enough generators");
-        let window = PEDERSEN_HASH_EXP_WINDOW_SIZE as usize;
-        let window_mask = (1u64 << window) - 1;
+        let window = JubjubBls12::pedersen_hash_exp_window_size();
+        let window_mask = (1 << window) - 1;
 
-        let acc = acc.to_repr();
-        let num_limbs: usize = acc.as_ref().len() / 8;
-        let mut limbs = vec![0u64; num_limbs + 1];
-        LittleEndian::read_u64_into(acc.as_ref(), &mut limbs[..num_limbs]);
+        let mut acc = acc.into_repr();
 
-        let mut tmp = jubjub::SubgroupPoint::identity();
+        let mut tmp = edwards::Point::zero();
 
-        let mut pos = 0;
-        while pos < jubjub::Fr::NUM_BITS as usize {
-            let u64_idx = pos / 64;
-            let bit_idx = pos % 64;
-            let i = (if bit_idx + window < 64 {
-                // This window's bits are contained in a single u64.
-                limbs[u64_idx] >> bit_idx
-            } else {
-                // Combine the current u64's bits with the bits from the next u64.
-                (limbs[u64_idx] >> bit_idx) | (limbs[u64_idx + 1] << (64 - bit_idx))
-            } & window_mask) as usize;
+        while !acc.is_zero() {
+            let i = (acc.as_ref()[0] & window_mask) as usize;
 
-            tmp += table[0][i];
+            tmp = tmp.add(&table[0][i], params);
 
-            pos += window;
+            acc.shr(window);
             table = &table[1..];
         }
 
-        result += tmp;
+        result = result.add(&tmp, params);
     }
 
     result
@@ -121,16 +110,16 @@ where
 
 #[cfg(test)]
 pub mod test {
-    use group::Curve;
 
     use super::*;
     use crate::test_vectors::pedersen_hash_vectors;
+    use pairing::bls12_381::Bls12;
 
     pub struct TestVector<'a> {
         pub personalization: Personalization,
         pub input_bits: Vec<u8>,
-        pub hash_u: &'a str,
-        pub hash_v: &'a str,
+        pub hash_x: &'a str,
+        pub hash_y: &'a str,
     }
 
     #[test]
@@ -140,19 +129,22 @@ pub mod test {
         assert!(test_vectors.len() > 0);
 
         for v in test_vectors.iter() {
+            let params = &JubjubBls12::new();
+
             let input_bools: Vec<bool> = v.input_bits.iter().map(|&i| i == 1).collect();
 
             // The 6 bits prefix is handled separately
             assert_eq!(v.personalization.get_bits(), &input_bools[..6]);
 
-            let p = jubjub::ExtendedPoint::from(pedersen_hash(
+            let (x, y) = pedersen_hash::<Bls12, _>(
                 v.personalization,
                 input_bools.into_iter().skip(6),
-            ))
-            .to_affine();
+                params,
+            )
+            .to_xy();
 
-            assert_eq!(p.get_u().to_string(), v.hash_u);
-            assert_eq!(p.get_v().to_string(), v.hash_v);
+            assert_eq!(x.to_string(), v.hash_x);
+            assert_eq!(y.to_string(), v.hash_y);
         }
     }
 }

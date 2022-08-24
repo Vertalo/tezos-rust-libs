@@ -1,4 +1,6 @@
-use sha2::{Digest, Sha256};
+extern crate sha2;
+
+use sha2::{Sha256, Digest};
 use std::env;
 use std::fs;
 use std::io::{self, Read};
@@ -23,12 +25,12 @@ fn process<D: Digest + Default, R: Read>(reader: &mut R, name: &str) {
             Ok(n) => n,
             Err(_) => return,
         };
-        sh.update(&buffer[..n]);
+        sh.input(&buffer[..n]);
         if n == 0 || n < BUFFER_SIZE {
             break;
         }
     }
-    print_result(&sh.finalize(), name);
+    print_result(&sh.result(), name);
 }
 
 fn main() {

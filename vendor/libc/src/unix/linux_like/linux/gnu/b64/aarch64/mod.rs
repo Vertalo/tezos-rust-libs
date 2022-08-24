@@ -979,6 +979,7 @@ pub const SYS_statx: ::c_long = 291;
 pub const SYS_pidfd_open: ::c_long = 434;
 pub const SYS_clone3: ::c_long = 435;
 
+#[link(name = "util")]
 extern "C" {
     pub fn sysctl(
         name: *mut ::c_int,
