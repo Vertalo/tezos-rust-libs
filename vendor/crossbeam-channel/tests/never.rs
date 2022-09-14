@@ -1,13 +1,9 @@
 //! Tests for the never channel flavor.
 
-#[macro_use]
-extern crate crossbeam_channel;
-extern crate rand;
-
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crossbeam_channel::{never, tick, unbounded};
+use crossbeam_channel::{never, select, tick, unbounded};
 
 fn ms(ms: u64) -> Duration {
     Duration::from_millis(ms)
@@ -69,8 +65,8 @@ fn capacity() {
 fn len_empty_full() {
     let r = never::<i32>();
     assert_eq!(r.len(), 0);
-    assert_eq!(r.is_empty(), true);
-    assert_eq!(r.is_full(), true);
+    assert!(r.is_empty());
+    assert!(r.is_full());
 }
 
 #[test]

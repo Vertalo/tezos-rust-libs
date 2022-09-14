@@ -1,15 +1,11 @@
-extern crate crossbeam_deque as deque;
-extern crate crossbeam_utils as utils;
-extern crate rand;
-
 use std::sync::atomic::Ordering::SeqCst;
 use std::sync::atomic::{AtomicBool, AtomicUsize};
 use std::sync::{Arc, Mutex};
 
-use deque::Steal::{Empty, Success};
-use deque::Worker;
+use crossbeam_deque::Steal::{Empty, Success};
+use crossbeam_deque::Worker;
+use crossbeam_utils::thread::scope;
 use rand::Rng;
-use utils::thread::scope;
 
 #[test]
 fn smoke() {
@@ -75,6 +71,9 @@ fn is_empty() {
 
 #[test]
 fn spsc() {
+    #[cfg(miri)]
+    const STEPS: usize = 500;
+    #[cfg(not(miri))]
     const STEPS: usize = 50_000;
 
     let w = Worker::new_lifo();
@@ -88,6 +87,8 @@ fn spsc() {
                         assert_eq!(i, v);
                         break;
                     }
+                    #[cfg(miri)]
+                    std::hint::spin_loop();
                 }
             }
 
@@ -104,6 +105,9 @@ fn spsc() {
 #[test]
 fn stampede() {
     const THREADS: usize = 8;
+    #[cfg(miri)]
+    const COUNT: usize = 500;
+    #[cfg(not(miri))]
     const COUNT: usize = 50_000;
 
     let w = Worker::new_lifo();
@@ -145,6 +149,9 @@ fn stampede() {
 #[test]
 fn stress() {
     const THREADS: usize = 8;
+    #[cfg(miri)]
+    const COUNT: usize = 500;
+    #[cfg(not(miri))]
     const COUNT: usize = 50_000;
 
     let w = Worker::new_lifo();
@@ -171,7 +178,7 @@ fn stress() {
                         hits.fetch_add(1, SeqCst);
                     }
 
-                    while let Some(_) = w2.pop() {
+                    while w2.pop().is_some() {
                         hits.fetch_add(1, SeqCst);
                     }
                 }
@@ -181,8 +188,8 @@ fn stress() {
         let mut rng = rand::thread_rng();
         let mut expected = 0;
         while expected < COUNT {
-            if rng.gen_range(0, 3) == 0 {
-                while let Some(_) = w.pop() {
+            if rng.gen_range(0..3) == 0 {
+                while w.pop().is_some() {
                     hits.fetch_add(1, SeqCst);
                 }
             } else {
@@ -192,7 +199,7 @@ fn stress() {
         }
 
         while hits.load(SeqCst) < COUNT {
-            while let Some(_) = w.pop() {
+            while w.pop().is_some() {
                 hits.fetch_add(1, SeqCst);
             }
         }
@@ -201,6 +208,7 @@ fn stress() {
     .unwrap();
 }
 
+#[cfg_attr(miri, ignore)] // Miri is too slow
 #[test]
 fn no_starvation() {
     const THREADS: usize = 8;
@@ -231,7 +239,7 @@ fn no_starvation() {
                         hits.fetch_add(1, SeqCst);
                     }
 
-                    while let Some(_) = w2.pop() {
+                    while w2.pop().is_some() {
                         hits.fetch_add(1, SeqCst);
                     }
                 }
@@ -241,9 +249,9 @@ fn no_starvation() {
         let mut rng = rand::thread_rng();
         let mut my_hits = 0;
         loop {
-            for i in 0..rng.gen_range(0, COUNT) {
-                if rng.gen_range(0, 3) == 0 && my_hits == 0 {
-                    while let Some(_) = w.pop() {
+            for i in 0..rng.gen_range(0..COUNT) {
+                if rng.gen_range(0..3) == 0 && my_hits == 0 {
+                    while w.pop().is_some() {
                         my_hits += 1;
                     }
                 } else {
@@ -262,8 +270,17 @@ fn no_starvation() {
 
 #[test]
 fn destructors() {
+    #[cfg(miri)]
+    const THREADS: usize = 2;
+    #[cfg(not(miri))]
     const THREADS: usize = 8;
+    #[cfg(miri)]
+    const COUNT: usize = 500;
+    #[cfg(not(miri))]
     const COUNT: usize = 50_000;
+    #[cfg(miri)]
+    const STEPS: usize = 100;
+    #[cfg(not(miri))]
     const STEPS: usize = 1000;
 
     struct Elem(usize, Arc<Mutex<Vec<usize>>>);
@@ -304,7 +321,7 @@ fn destructors() {
                         remaining.fetch_sub(1, SeqCst);
                     }
 
-                    while let Some(_) = w2.pop() {
+                    while w2.pop().is_some() {
                         cnt += 1;
                         remaining.fetch_sub(1, SeqCst);
                     }
@@ -313,7 +330,7 @@ fn destructors() {
         }
 
         for _ in 0..STEPS {
-            if let Some(_) = w.pop() {
+            if w.pop().is_some() {
                 remaining.fetch_sub(1, SeqCst);
             }
         }
@@ -334,7 +351,7 @@ fn destructors() {
     {
         let mut v = dropped.lock().unwrap();
         assert_eq!(v.len(), rem);
-        v.sort();
+        v.sort_unstable();
         for pair in v.windows(2) {
             assert_eq!(pair[0] + 1, pair[1]);
         }

@@ -4,10 +4,19 @@
 //! is registered in the default collector.  If initialized, the thread's participant will get
 //! destructed on thread exit, which in turn unregisters the thread.
 
-use collector::{Collector, LocalHandle};
-use guard::Guard;
+use crate::collector::{Collector, LocalHandle};
+use crate::guard::Guard;
+use crate::primitive::thread_local;
+#[cfg(not(crossbeam_loom))]
+use once_cell::sync::Lazy;
 
-lazy_static! {
+/// The global data for the default garbage collector.
+#[cfg(not(crossbeam_loom))]
+static COLLECTOR: Lazy<Collector> = Lazy::new(Collector::new);
+// FIXME: loom does not currently provide the equivalent of Lazy:
+// https://github.com/tokio-rs/loom/issues/263
+#[cfg(crossbeam_loom)]
+loom::lazy_static! {
     /// The global data for the default garbage collector.
     static ref COLLECTOR: Collector = Collector::new();
 }
@@ -44,7 +53,7 @@ where
         .unwrap_or_else(|_| f(&COLLECTOR.register()))
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(crossbeam_loom)))]
 mod tests {
     use crossbeam_utils::thread;
 

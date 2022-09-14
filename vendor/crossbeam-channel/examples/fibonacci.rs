@@ -1,7 +1,5 @@
 //! An asynchronous fibonacci sequence generator.
 
-extern crate crossbeam_channel;
-
 use std::thread;
 
 use crossbeam_channel::{bounded, Sender};
@@ -12,7 +10,7 @@ fn fibonacci(sender: Sender<u64>) {
     while sender.send(x).is_ok() {
         let tmp = x;
         x = y;
-        y = tmp + y;
+        y += tmp;
     }
 }
 

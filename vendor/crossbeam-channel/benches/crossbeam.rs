@@ -1,8 +1,5 @@
 #![feature(test)]
 
-extern crate crossbeam_channel;
-extern crate crossbeam_utils;
-extern crate num_cpus;
 extern crate test;
 
 use crossbeam_channel::{bounded, unbounded};
@@ -16,7 +13,7 @@ mod unbounded {
 
     #[bench]
     fn create(b: &mut Bencher) {
-        b.iter(|| unbounded::<i32>());
+        b.iter(unbounded::<i32>);
     }
 
     #[bench]

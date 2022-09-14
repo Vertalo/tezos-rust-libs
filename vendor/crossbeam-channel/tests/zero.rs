@@ -1,17 +1,12 @@
 //! Tests for the zero channel flavor.
 
-#[macro_use]
-extern crate crossbeam_channel;
-extern crate crossbeam_utils;
-extern crate rand;
-
 use std::any::Any;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::Duration;
 
-use crossbeam_channel::{bounded, Receiver};
+use crossbeam_channel::{bounded, select, Receiver};
 use crossbeam_channel::{RecvError, RecvTimeoutError, TryRecvError};
 use crossbeam_channel::{SendError, SendTimeoutError, TrySendError};
 use crossbeam_utils::thread::scope;
@@ -40,11 +35,11 @@ fn len_empty_full() {
     let (s, r) = bounded(0);
 
     assert_eq!(s.len(), 0);
-    assert_eq!(s.is_empty(), true);
-    assert_eq!(s.is_full(), true);
+    assert!(s.is_empty());
+    assert!(s.is_full());
     assert_eq!(r.len(), 0);
-    assert_eq!(r.is_empty(), true);
-    assert_eq!(r.is_full(), true);
+    assert!(r.is_empty());
+    assert!(r.is_full());
 
     scope(|scope| {
         scope.spawn(|_| s.send(0).unwrap());
@@ -53,11 +48,11 @@ fn len_empty_full() {
     .unwrap();
 
     assert_eq!(s.len(), 0);
-    assert_eq!(s.is_empty(), true);
-    assert_eq!(s.is_full(), true);
+    assert!(s.is_empty());
+    assert!(s.is_full());
     assert_eq!(r.len(), 0);
-    assert_eq!(r.is_empty(), true);
-    assert_eq!(r.is_full(), true);
+    assert!(r.is_empty());
+    assert!(r.is_full());
 }
 
 #[test]
@@ -192,6 +187,9 @@ fn send_timeout() {
 
 #[test]
 fn len() {
+    #[cfg(miri)]
+    const COUNT: usize = 50;
+    #[cfg(not(miri))]
     const COUNT: usize = 25_000;
 
     let (s, r) = bounded(0);
@@ -254,6 +252,9 @@ fn disconnect_wakes_receiver() {
 
 #[test]
 fn spsc() {
+    #[cfg(miri)]
+    const COUNT: usize = 50;
+    #[cfg(not(miri))]
     const COUNT: usize = 100_000;
 
     let (s, r) = bounded(0);
@@ -276,6 +277,9 @@ fn spsc() {
 
 #[test]
 fn mpmc() {
+    #[cfg(miri)]
+    const COUNT: usize = 50;
+    #[cfg(not(miri))]
     const COUNT: usize = 25_000;
     const THREADS: usize = 4;
 
@@ -308,6 +312,9 @@ fn mpmc() {
 
 #[test]
 fn stress_oneshot() {
+    #[cfg(miri)]
+    const COUNT: usize = 50;
+    #[cfg(not(miri))]
     const COUNT: usize = 10_000;
 
     for _ in 0..COUNT {
@@ -323,6 +330,9 @@ fn stress_oneshot() {
 
 #[test]
 fn stress_iter() {
+    #[cfg(miri)]
+    const COUNT: usize = 50;
+    #[cfg(not(miri))]
     const COUNT: usize = 1000;
 
     let (request_s, request_r) = bounded(0);
@@ -390,6 +400,15 @@ fn stress_timeout_two_threads() {
 
 #[test]
 fn drops() {
+    #[cfg(miri)]
+    const RUNS: usize = 20;
+    #[cfg(not(miri))]
+    const RUNS: usize = 100;
+    #[cfg(miri)]
+    const STEPS: usize = 100;
+    #[cfg(not(miri))]
+    const STEPS: usize = 10_000;
+
     static DROPS: AtomicUsize = AtomicUsize::new(0);
 
     #[derive(Debug, PartialEq)]
@@ -403,8 +422,8 @@ fn drops() {
 
     let mut rng = thread_rng();
 
-    for _ in 0..100 {
-        let steps = rng.gen_range(0, 3_000);
+    for _ in 0..RUNS {
+        let steps = rng.gen_range(0..STEPS);
 
         DROPS.store(0, Ordering::SeqCst);
         let (s, r) = bounded::<DropCounter>(0);
@@ -433,6 +452,9 @@ fn drops() {
 
 #[test]
 fn fairness() {
+    #[cfg(miri)]
+    const COUNT: usize = 50;
+    #[cfg(not(miri))]
     const COUNT: usize = 10_000;
 
     let (s1, r1) = bounded::<()>(0);
@@ -464,6 +486,9 @@ fn fairness() {
 
 #[test]
 fn fairness_duplicates() {
+    #[cfg(miri)]
+    const COUNT: usize = 100;
+    #[cfg(not(miri))]
     const COUNT: usize = 10_000;
 
     let (s, r) = bounded::<()>(0);
@@ -522,6 +547,9 @@ fn recv_in_send() {
 
 #[test]
 fn channel_through_channel() {
+    #[cfg(miri)]
+    const COUNT: usize = 50;
+    #[cfg(not(miri))]
     const COUNT: usize = 1000;
 
     type T = Box<dyn Any + Send>;
