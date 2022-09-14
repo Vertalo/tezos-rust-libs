@@ -1,4 +1,7 @@
 lib: [
   "librustzcash/include/librustzcash.h"
-  "target/release/librustzcash.a"
+  "target-librustzcash/release/librustzcash.a"
+  "wasmer-2.3.0/lib/c-api/wasm.h"
+  "wasmer-2.3.0/lib/c-api/wasmer.h"
+  "target-wasmer/release/libwasmer.a"
 ]

@@ -9,6 +9,21 @@ depends: [
   "conf-rust"
 ]
 build:[
-  ["cargo" "build" "--target-dir" "target" "--release"]
+  [
+    "cargo"
+    "build"
+    "--target-dir" "target-librustzcash"
+    "--release"
+    "--package" "librustzcash"
+  ]
+  [
+    "cargo"
+    "build"
+    "--target-dir" "target-wasmer"
+    "--release"
+    "--package" "wasmer-c-api"
+    "--no-default-features"
+    "--features" "singlepass,wat,compiler,middlewares,universal"
+  ]
 ]
 synopsis: "Tezos: all rust dependencies and their dependencies"
