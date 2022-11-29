@@ -3,5 +3,5 @@ lib: [
   "target-librustzcash/release/librustzcash.a"
   "wasmer-2.3.0/lib/c-api/wasm.h"
   "wasmer-2.3.0/lib/c-api/wasmer.h"
-  "target-wasmer/release/libwasmer.a"
+  "target-wasmer/release/libwasmer.dylib"
 ]
