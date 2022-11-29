@@ -23,7 +23,7 @@ build:[
     "--release"
     "--package" "wasmer-c-api"
     "--no-default-features"
-    "--features" "singlepass,wat,compiler,middlewares,universal"
+    "--features" "singlepass,cranelift,wat,middlewares,universal"
   ]
 ]
 synopsis: "Tezos: all rust dependencies and their dependencies"
