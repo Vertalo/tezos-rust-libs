@@ -22,12 +22,12 @@ rust-version = "1.59"
 
 [lib]
 name = "rustzcash"
-path = "src/rust/src/rustzcash.rs"
+path = "src/rustzcash.rs"
 crate-type = ["staticlib"]
 
 [[bin]]
 name = "zcashd-wallet-tool"
-path = "src/rust/bin/wallet_tool.rs"
+path = "bin/wallet_tool.rs"
 
 [dependencies]
 bellman = "0.13"
