@@ -1,6 +1,9 @@
-#ifndef LIBRUSTZCASH_INCLUDE_H_
-#define LIBRUSTZCASH_INCLUDE_H_
+#ifndef ZCASH_RUST_INCLUDE_LIBRUSTZCASH_H
+#define ZCASH_RUST_INCLUDE_LIBRUSTZCASH_H
 
+#include "rust/types.h"
+
+#include <stddef.h>
 #include <stdint.h>
 
 #ifndef __cplusplus
@@ -8,23 +11,8 @@
   #include <stdalign.h>
 #endif
 
-#define ENTRY_SERIALIZED_LENGTH 180
-
-typedef struct HistoryEntry {
-    unsigned char bytes[ENTRY_SERIALIZED_LENGTH];
-}  HistoryEntry;
-static_assert(
-    sizeof(HistoryEntry) == ENTRY_SERIALIZED_LENGTH,
-    "HistoryEntry struct is not the same size as the underlying byte array");
-static_assert(alignof(HistoryEntry) == 1, "HistoryEntry struct alignment is not 1");
-
 #ifdef __cplusplus
 extern "C" {
-#endif
-#ifdef WIN32
-    typedef uint16_t codeunit;
-#else
-    typedef uint8_t codeunit;
 #endif
 
     void librustzcash_to_scalar(const unsigned char *input, unsigned char *result);
@@ -44,13 +32,10 @@ extern "C" {
     void librustzcash_init_zksnark_params(
         const codeunit* spend_path,
         size_t spend_path_len,
-        const char* spend_hash,
         const codeunit* output_path,
         size_t output_path_len,
-        const char* output_hash,
         const codeunit* sprout_path,
-        size_t sprout_path_len,
-        const char* sprout_hash
+        size_t sprout_path_len
     );
 
     /// Validates the provided Equihash solution against
@@ -152,7 +137,9 @@ extern "C" {
 
     /// Creates a Sapling verification context. Please free this
     /// when you're done.
-    void * librustzcash_sapling_verification_ctx_init();
+    void * librustzcash_sapling_verification_ctx_init(
+        bool zip216Enabled
+    );
 
     /// Check the validity of a Sapling Spend description,
     /// accumulating the value commitment into the context.
@@ -200,7 +187,7 @@ extern "C" {
         const unsigned char *diversifier,
         const unsigned char *pk_d,
         const uint64_t value,
-        const unsigned char *r,
+        const unsigned char *rcm,
         const unsigned char *ak,
         const unsigned char *nk,
         const uint64_t position,
@@ -213,11 +200,12 @@ extern "C" {
     /// The `pk_d` and `r` parameters must be of length 32.
     /// The result is also of length 32 and placed in `result`.
     /// Returns false if the diversifier or pk_d is not valid
-    bool librustzcash_sapling_compute_cm(
+    bool librustzcash_sapling_compute_cmu(
+        bool zip216_enabled,
         const unsigned char *diversifier,
         const unsigned char *pk_d,
         const uint64_t value,
-        const unsigned char *r,
+        const unsigned char *rcm,
         unsigned char *result
     );
 
@@ -227,6 +215,7 @@ extern "C" {
     /// the result is written to the 32-byte
     /// `result` buffer.
     bool librustzcash_sapling_ka_agree(
+        bool zip216_enabled,
         const unsigned char *p,
         const unsigned char *sk,
         unsigned char *result
@@ -297,62 +286,116 @@ extern "C" {
     );
 
     /// Derive the master ExtendedSpendingKey from a seed.
-    void librustzcash_zip32_xsk_master(
+    void librustzcash_zip32_sapling_xsk_master(
         const unsigned char *seed,
         size_t seedlen,
         unsigned char *xsk_master
     );
 
     /// Derive a child ExtendedSpendingKey from a parent.
-    void librustzcash_zip32_xsk_derive(
+    void librustzcash_zip32_sapling_xsk_derive(
         const unsigned char *xsk_parent,
         uint32_t i,
         unsigned char *xsk_i
     );
 
+    /// Derive a internal ExtendedSpendingKey from an external key
+    void librustzcash_zip32_sapling_xsk_derive_internal(
+        const unsigned char *xsk_external,
+        unsigned char *xsk_internal
+    );
+
     /// Derive a child ExtendedFullViewingKey from a parent.
-    bool librustzcash_zip32_xfvk_derive(
+    bool librustzcash_zip32_sapling_xfvk_derive(
         const unsigned char *xfvk_parent,
         uint32_t i,
         unsigned char *xfvk_i
     );
 
-    /// Derive a PaymentAddress from an ExtendedFullViewingKey.
-    bool librustzcash_zip32_xfvk_address(
-        const unsigned char *xfvk,
+    /**
+     * Derive the Sapling internal FVK corresponding to the given
+     * Sapling external FVK.
+     */
+    void librustzcash_zip32_sapling_derive_internal_fvk(
+        const unsigned char *fvk,
+        const unsigned char *dk,
+        unsigned char *fvk_ret,
+        unsigned char *dk_ret
+    );
+
+    /**
+     * Derive a PaymentAddress from a (SaplingFullViewingKey, DiversifierKey)
+     * pair.  Returns 'false' if no valid address can be derived for the
+     * specified diversifier index.
+     *
+     * Arguments:
+     * - fvk: [c_uchar; 96] the serialized form of a Sapling full viewing key
+     * - dk: [c_uchar; 32] the byte representation of a Sapling diversifier key
+     * - j: [c_uchar; 11] the 88-bit diversifier index, encoded in little-endian
+     *   order
+     * - addr_ret: [c_uchar; 43] array to which the returned address will be
+     *   written, if the specified diversifier index `j` produces a valid
+     *   address.
+     */
+    bool librustzcash_zip32_sapling_address(
+        const unsigned char *fvk,
+        const unsigned char *dk,
+        const unsigned char *j,
+        unsigned char *addr_ret
+    );
+
+    /**
+     * Derive a PaymentAddress from a (SaplingFullViewingKey, DiversifierKey)
+     * pair by searching the space of valid diversifiers starting at
+     * diversifier index `j`. This will always return a valid address along
+     * with the diversifier index that produced the address unless no addresses
+     * can be derived at any diversifier index >= `j`, in which case this
+     * function will return `false`.
+     *
+     * Arguments:
+     * - fvk: [c_uchar; 96] the serialized form of a Sapling full viewing key
+     * - dk: [c_uchar; 32] the byte representation of a Sapling diversifier key
+     * - j: [c_uchar; 11] the 88-bit diversifier index at which to start
+     *   searching, encoded in little-endian order
+     * - j_ret: [c_uchar; 11] array that will store the diversifier index at
+     *   which the returned address was found
+     * - addr_ret: [c_uchar; 43] array to which the returned address will be
+     *   written
+     */
+    bool librustzcash_zip32_find_sapling_address(
+        const unsigned char *fvk,
+        const unsigned char *dk,
         const unsigned char *j,
         unsigned char *j_ret,
         unsigned char *addr_ret
     );
 
-    uint32_t librustzcash_mmr_append(
-        uint32_t cbranch,
-        uint32_t t_len,
-        const uint32_t *ni_ptr,
-        const HistoryEntry *n_ptr,
-        size_t p_len,
-        const unsigned char *nn_ptr,
-        unsigned char *rt_ret,
-        unsigned char *buf_ret
+    /**
+     * Decrypts a Sapling diversifier using the specified diversifier key
+     * to obtain the diversifier index `j` at which the diversifier was
+     * derived.
+     *
+     * Arguments:
+     * - dk: [c_uchar; 32] the byte representation of a Sapling diversifier key
+     * - addr: [c_uchar; 11] the bytes of the diversifier
+     * - j_ret: [c_uchar; 11] array that will store the resulting diversifier index
+     */
+    void librustzcash_sapling_diversifier_index(
+        const unsigned char *dk,
+        const unsigned char *d,
+        unsigned char *j_ret
     );
 
-    uint32_t librustzcash_mmr_delete(
-        uint32_t cbranch,
-        uint32_t t_len,
-        const uint32_t *ni_ptr,
-        const HistoryEntry *n_ptr,
-        size_t p_len,
-        size_t e_len,
-        unsigned char *rt_ret
-    );
-
-    uint32_t librustzcash_mmr_hash_node(
-        uint32_t cbranch,
-        const unsigned char *n_ptr,
-        unsigned char *h_ret
+    /// Fills the provided buffer with random bytes. This is intended to
+    /// be a cryptographically secure RNG; it uses Rust's `OsRng`, which
+    /// is implemented in terms of the `getrandom` crate. The first call
+    /// to this function may block until sufficient randomness is available.
+    void librustzcash_getrandom(
+        unsigned char *buf,
+        size_t buf_len
     );
 #ifdef __cplusplus
 }
 #endif
 
-#endif // LIBRUSTZCASH_INCLUDE_H_
+#endif // ZCASH_RUST_INCLUDE_LIBRUSTZCASH_H

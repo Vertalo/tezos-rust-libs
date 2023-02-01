@@ -6,13 +6,18 @@ the `zcashd` full node.
 The FFI API does not have any stability guarantees, and will change as required
 by `zcashd`.
 
+# zcashd-wallet-tool
+
+`zcashd-wallet-tool` is a command-line tool that allows confirming to a `zcashd`
+node that the emergency recovery phrase of the node's wallet has been backed up.
+
 ## License
 
 Licensed under either of
 
  * Apache License, Version 2.0, ([LICENSE-APACHE](../LICENSE-APACHE) or
-   http://www.apache.org/licenses/LICENSE-2.0)
- * MIT license ([LICENSE-MIT](../LICENSE-MIT) or http://opensource.org/licenses/MIT)
+   https://www.apache.org/licenses/LICENSE-2.0)
+ * MIT license ([LICENSE-MIT](../LICENSE-MIT) or https://opensource.org/licenses/MIT)
 
 at your option.
 
