@@ -1,46 +1,57 @@
-use super::multicore::Worker;
-use bit_vec::{self, BitVec};
-use ff::{Field, PrimeField, PrimeFieldRepr, ScalarEngine};
-use futures::Future;
-use group::{CurveAffine, CurveProjective};
+use super::multicore::{Waiter, Worker};
+use bitvec::vec::BitVec;
+use ff::{FieldBits, PrimeField, PrimeFieldBits};
+use group::prime::{PrimeCurve, PrimeCurveAffine};
 use std::io;
 use std::iter;
+use std::ops::AddAssign;
 use std::sync::Arc;
+
+#[cfg(feature = "multicore")]
+use rayon::prelude::*;
+
+#[cfg(not(feature = "multicore"))]
+use crate::multicore::FakeParallelIterator;
 
 use super::SynthesisError;
 
 /// An object that builds a source of bases.
-pub trait SourceBuilder<G: CurveAffine>: Send + Sync + 'static + Clone {
+pub trait SourceBuilder<G: PrimeCurveAffine>: Send + Sync + 'static + Clone {
     type Source: Source<G>;
 
-    fn new(self) -> Self::Source;
+    fn build(self) -> Self::Source;
 }
 
 /// A source of bases, like an iterator.
-pub trait Source<G: CurveAffine> {
-    /// Parses the element from the source. Fails if the point is at infinity.
-    fn add_assign_mixed(
-        &mut self,
-        to: &mut <G as CurveAffine>::Projective,
-    ) -> Result<(), SynthesisError>;
+pub trait Source<G: PrimeCurveAffine> {
+    fn next(&mut self) -> Result<&G, SynthesisError>;
 
     /// Skips `amt` elements from the source, avoiding deserialization.
     fn skip(&mut self, amt: usize) -> Result<(), SynthesisError>;
 }
 
-impl<G: CurveAffine> SourceBuilder<G> for (Arc<Vec<G>>, usize) {
+pub trait AddAssignFromSource: PrimeCurve {
+    /// Parses the element from the source. Fails if the point is at infinity.
+    fn add_assign_from_source<S: Source<<Self as PrimeCurve>::Affine>>(
+        &mut self,
+        source: &mut S,
+    ) -> Result<(), SynthesisError> {
+        AddAssign::<&<Self as PrimeCurve>::Affine>::add_assign(self, source.next()?);
+        Ok(())
+    }
+}
+impl<G> AddAssignFromSource for G where G: PrimeCurve {}
+
+impl<G: PrimeCurveAffine> SourceBuilder<G> for (Arc<Vec<G>>, usize) {
     type Source = (Arc<Vec<G>>, usize);
 
-    fn new(self) -> (Arc<Vec<G>>, usize) {
+    fn build(self) -> (Arc<Vec<G>>, usize) {
         (self.0.clone(), self.1)
     }
 }
 
-impl<G: CurveAffine> Source<G> for (Arc<Vec<G>>, usize) {
-    fn add_assign_mixed(
-        &mut self,
-        to: &mut <G as CurveAffine>::Projective,
-    ) -> Result<(), SynthesisError> {
+impl<G: PrimeCurveAffine> Source<G> for (Arc<Vec<G>>, usize) {
+    fn next(&mut self) -> Result<&G, SynthesisError> {
         if self.0.len() <= self.1 {
             return Err(io::Error::new(
                 io::ErrorKind::UnexpectedEof,
@@ -49,15 +60,14 @@ impl<G: CurveAffine> Source<G> for (Arc<Vec<G>>, usize) {
             .into());
         }
 
-        if self.0[self.1].is_zero() {
+        if self.0[self.1].is_identity().into() {
             return Err(SynthesisError::UnexpectedIdentity);
         }
 
-        to.add_assign_mixed(&self.0[self.1]);
-
+        let ret = &self.0[self.1];
         self.1 += 1;
 
-        Ok(())
+        Ok(ret)
     }
 
     fn skip(&mut self, amt: usize) -> Result<(), SynthesisError> {
@@ -106,14 +116,13 @@ impl<'a> QueryDensity for &'a FullDensity {
 
 pub struct DensityTracker {
     bv: BitVec,
-    total_density: usize,
 }
 
 impl<'a> QueryDensity for &'a DensityTracker {
-    type Iter = bit_vec::Iter<'a>;
+    type Iter = Box<dyn 'a + Iterator<Item = bool>>;
 
     fn iter(self) -> Self::Iter {
-        self.bv.iter()
+        Box::new(self.bv.iter().by_vals())
     }
 
     fn get_query_size(self) -> Option<usize> {
@@ -121,12 +130,15 @@ impl<'a> QueryDensity for &'a DensityTracker {
     }
 }
 
+impl Default for DensityTracker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DensityTracker {
     pub fn new() -> DensityTracker {
-        DensityTracker {
-            bv: BitVec::new(),
-            total_density: 0,
-        }
+        DensityTracker { bv: BitVec::new() }
     }
 
     pub fn add_element(&mut self) {
@@ -136,117 +148,156 @@ impl DensityTracker {
     pub fn inc(&mut self, idx: usize) {
         if !self.bv.get(idx).unwrap() {
             self.bv.set(idx, true);
-            self.total_density += 1;
         }
     }
 
     pub fn get_total_density(&self) -> usize {
-        self.total_density
+        self.bv.count_ones()
+    }
+}
+
+enum ChunkedExponent {
+    Zero,
+    One,
+    Chunks(Vec<u64>),
+}
+
+/// An exponent
+pub enum Exponent<F: PrimeFieldBits> {
+    Zero,
+    One,
+    Bits(FieldBits<F::ReprBits>),
+}
+
+impl<F: PrimeFieldBits> From<&F> for Exponent<F> {
+    fn from(exp: &F) -> Self {
+        if exp.is_zero_vartime() {
+            Exponent::Zero
+        } else if exp == &F::one() {
+            Exponent::One
+        } else {
+            Exponent::Bits(exp.to_le_bits())
+        }
+    }
+}
+
+impl<F: PrimeFieldBits> From<F> for Exponent<F> {
+    fn from(exp: F) -> Self {
+        (&exp).into()
+    }
+}
+
+impl<F: PrimeFieldBits> Exponent<F> {
+    fn chunks(&self, c: usize) -> ChunkedExponent {
+        match self {
+            Self::Zero => ChunkedExponent::Zero,
+            Self::One => ChunkedExponent::One,
+            Self::Bits(exp) => ChunkedExponent::Chunks(
+                exp.chunks(c)
+                    .map(|chunk| {
+                        chunk
+                            .iter()
+                            .by_vals()
+                            .enumerate()
+                            .fold(0u64, |acc, (i, b)| acc + ((b as u64) << i))
+                    })
+                    .collect(),
+            ),
+        }
     }
 }
 
 fn multiexp_inner<Q, D, G, S>(
-    pool: &Worker,
     bases: S,
     density_map: D,
-    exponents: Arc<Vec<<<G::Engine as ScalarEngine>::Fr as PrimeField>::Repr>>,
-    mut skip: u32,
+    exponents: Arc<Vec<Exponent<G::Scalar>>>,
     c: u32,
-    handle_trivial: bool,
-) -> Box<dyn Future<Item = <G as CurveAffine>::Projective, Error = SynthesisError>>
+) -> Result<G, SynthesisError>
 where
     for<'a> &'a Q: QueryDensity,
     D: Send + Sync + 'static + Clone + AsRef<Q>,
-    G: CurveAffine,
-    S: SourceBuilder<G>,
+    G: PrimeCurve,
+    G::Scalar: PrimeFieldBits,
+    S: SourceBuilder<<G as PrimeCurve>::Affine>,
 {
     // Perform this region of the multiexp
-    let this = {
-        let bases = bases.clone();
-        let exponents = exponents.clone();
-        let density_map = density_map.clone();
+    let this = move |bases: S,
+                     density_map: D,
+                     exponents: Arc<Vec<ChunkedExponent>>,
+                     chunk: usize|
+          -> Result<_, SynthesisError> {
+        // Accumulate the result
+        let mut acc = G::identity();
 
-        pool.compute(move || {
-            // Accumulate the result
-            let mut acc = G::Projective::zero();
+        // Build a source for the bases
+        let mut bases = bases.build();
 
-            // Build a source for the bases
-            let mut bases = bases.new();
+        // Create space for the buckets
+        let mut buckets = vec![G::identity(); (1 << c) - 1];
 
-            // Create space for the buckets
-            let mut buckets = vec![<G as CurveAffine>::Projective::zero(); (1 << c) - 1];
+        // only the first round uses this
+        let handle_trivial = chunk == 0;
 
-            let zero = <G::Engine as ScalarEngine>::Fr::zero().into_repr();
-            let one = <G::Engine as ScalarEngine>::Fr::one().into_repr();
-
-            // Sort the bases into buckets
-            for (&exp, density) in exponents.iter().zip(density_map.as_ref().iter()) {
-                if density {
-                    if exp == zero {
-                        bases.skip(1)?;
-                    } else if exp == one {
+        // Sort the bases into buckets
+        for (exp, density) in exponents.iter().zip(density_map.as_ref().iter()) {
+            if density {
+                match exp {
+                    ChunkedExponent::Zero => bases.skip(1)?,
+                    ChunkedExponent::One => {
                         if handle_trivial {
-                            bases.add_assign_mixed(&mut acc)?;
+                            acc.add_assign_from_source(&mut bases)?;
                         } else {
                             bases.skip(1)?;
                         }
-                    } else {
-                        let mut exp = exp;
-                        exp.shr(skip);
-                        let exp = exp.as_ref()[0] % (1 << c);
+                    }
+                    ChunkedExponent::Chunks(chunks) => {
+                        let exp = chunks[chunk];
 
                         if exp != 0 {
-                            bases.add_assign_mixed(&mut buckets[(exp - 1) as usize])?;
+                            (&mut buckets[(exp - 1) as usize])
+                                .add_assign_from_source(&mut bases)?;
                         } else {
                             bases.skip(1)?;
                         }
                     }
                 }
             }
+        }
 
-            // Summation by parts
-            // e.g. 3a + 2b + 1c = a +
-            //                    (a) + b +
-            //                    ((a) + b) + c
-            let mut running_sum = G::Projective::zero();
-            for exp in buckets.into_iter().rev() {
-                running_sum.add_assign(&exp);
-                acc.add_assign(&running_sum);
-            }
+        // Summation by parts
+        // e.g. 3a + 2b + 1c = a +
+        //                    (a) + b +
+        //                    ((a) + b) + c
+        let mut running_sum = G::identity();
+        for exp in buckets.into_iter().rev() {
+            running_sum.add_assign(&exp);
+            acc.add_assign(&running_sum);
+        }
 
-            Ok(acc)
-        })
+        Ok(acc)
     };
 
-    skip += c;
+    // Split the exponents into chunks.
+    let exponents = Arc::new(
+        exponents
+            .iter()
+            .map(|exp| exp.chunks(c as usize))
+            .collect::<Vec<_>>(),
+    );
 
-    if skip >= <G::Engine as ScalarEngine>::Fr::NUM_BITS {
-        // There isn't another region.
-        Box::new(this)
-    } else {
-        // There's another region more significant. Calculate and join it with
-        // this region recursively.
-        Box::new(
-            this.join(multiexp_inner(
-                pool,
-                bases,
-                density_map,
-                exponents,
-                skip,
-                c,
-                false,
-            ))
-            .map(move |(this, mut higher)| {
-                for _ in 0..c {
-                    higher.double();
-                }
+    let parts = (0..G::Scalar::NUM_BITS)
+        .into_par_iter()
+        .step_by(c as usize)
+        .enumerate()
+        .map(|(chunk, _)| this(bases.clone(), density_map.clone(), exponents.clone(), chunk))
+        .collect::<Vec<Result<_, _>>>();
 
-                higher.add_assign(&this);
-
-                higher
-            }),
-        )
-    }
+    parts
+        .into_iter()
+        .rev()
+        .try_fold(G::identity(), |acc, part| {
+            part.map(|part| (0..c).fold(acc, |acc, _| acc.double()) + part)
+        })
 }
 
 /// Perform multi-exponentiation. The caller is responsible for ensuring the
@@ -255,13 +306,14 @@ pub fn multiexp<Q, D, G, S>(
     pool: &Worker,
     bases: S,
     density_map: D,
-    exponents: Arc<Vec<<<G::Engine as ScalarEngine>::Fr as PrimeField>::Repr>>,
-) -> Box<dyn Future<Item = <G as CurveAffine>::Projective, Error = SynthesisError>>
+    exponents: Arc<Vec<Exponent<G::Scalar>>>,
+) -> Waiter<Result<G, SynthesisError>>
 where
     for<'a> &'a Q: QueryDensity,
     D: Send + Sync + 'static + Clone + AsRef<Q>,
-    G: CurveAffine,
-    S: SourceBuilder<G>,
+    G: PrimeCurve,
+    G::Scalar: PrimeFieldBits,
+    S: SourceBuilder<<G as PrimeCurve>::Affine>,
 {
     let c = if exponents.len() < 32 {
         3u32
@@ -276,49 +328,51 @@ where
         assert!(query_size == exponents.len());
     }
 
-    multiexp_inner(pool, bases, density_map, exponents, 0, c, true)
+    pool.compute(move || multiexp_inner(bases, density_map, exponents, c))
 }
 
 #[cfg(feature = "pairing")]
 #[test]
 fn test_with_bls12() {
-    fn naive_multiexp<G: CurveAffine>(
-        bases: Arc<Vec<G>>,
-        exponents: Arc<Vec<<G::Scalar as PrimeField>::Repr>>,
-    ) -> G::Projective {
+    fn naive_multiexp<G: PrimeCurve>(
+        bases: Arc<Vec<<G as PrimeCurve>::Affine>>,
+        exponents: Arc<Vec<G::Scalar>>,
+    ) -> G {
         assert_eq!(bases.len(), exponents.len());
 
-        let mut acc = G::Projective::zero();
+        let mut acc = G::identity();
 
         for (base, exp) in bases.iter().zip(exponents.iter()) {
-            acc.add_assign(&base.mul(*exp));
+            AddAssign::<&G>::add_assign(&mut acc, &(*base * *exp));
         }
 
         acc
     }
 
-    use pairing::{bls12_381::Bls12, Engine};
-    use rand;
+    use bls12_381::{Bls12, Scalar};
+    use ff::Field;
+    use group::{Curve, Group};
+    use pairing::Engine;
 
     const SAMPLES: usize = 1 << 14;
 
-    let rng = &mut rand::thread_rng();
+    let mut rng = rand::thread_rng();
     let v = Arc::new(
         (0..SAMPLES)
-            .map(|_| <Bls12 as ScalarEngine>::Fr::random(rng).into_repr())
+            .map(|_| Scalar::random(&mut rng))
             .collect::<Vec<_>>(),
     );
+    let v_bits = Arc::new(v.iter().map(|e| e.into()).collect::<Vec<_>>());
     let g = Arc::new(
         (0..SAMPLES)
-            .map(|_| <Bls12 as Engine>::G1::random(rng).into_affine())
+            .map(|_| <Bls12 as Engine>::G1::random(&mut rng).to_affine())
             .collect::<Vec<_>>(),
     );
 
-    let naive = naive_multiexp(g.clone(), v.clone());
+    let naive: <Bls12 as Engine>::G1 = naive_multiexp(g.clone(), v);
 
     let pool = Worker::new();
-
-    let fast = multiexp(&pool, (g, 0), FullDensity, v).wait().unwrap();
+    let fast = multiexp(&pool, (g, 0), FullDensity, v_bits).wait().unwrap();
 
     assert_eq!(naive, fast);
 }

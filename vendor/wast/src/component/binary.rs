@@ -2,11 +2,11 @@ use crate::component::*;
 use crate::core;
 use crate::token::{Id, Index, NameAnnotation};
 use wasm_encoder::{
-    AliasSection, CanonicalFunctionSection, ComponentAliasSection, ComponentDefinedTypeEncoder,
-    ComponentExportSection, ComponentImportSection, ComponentInstanceSection, ComponentSection,
-    ComponentSectionId, ComponentStartSection, ComponentTypeEncoder, ComponentTypeSection,
-    CoreTypeEncoder, CoreTypeSection, InstanceSection, NestedComponentSection, RawSection,
-    SectionId,
+    CanonicalFunctionSection, ComponentAliasSection, ComponentDefinedTypeEncoder,
+    ComponentExportSection, ComponentImportSection, ComponentInstanceSection, ComponentNameSection,
+    ComponentSection, ComponentSectionId, ComponentStartSection, ComponentTypeEncoder,
+    ComponentTypeSection, CoreTypeEncoder, CoreTypeSection, InstanceSection, NameMap,
+    NestedComponentSection, RawSection, SectionId,
 };
 
 pub fn encode(component: &Component<'_>) -> Vec<u8> {
@@ -20,8 +20,8 @@ pub fn encode(component: &Component<'_>) -> Vec<u8> {
 
 fn encode_fields(
     // TODO: use the id and name for a future names section
-    _component_id: &Option<Id<'_>>,
-    _component_name: &Option<NameAnnotation<'_>>,
+    component_id: &Option<Id<'_>>,
+    component_name: &Option<NameAnnotation<'_>>,
     fields: &[ComponentField<'_>],
 ) -> wasm_encoder::Component {
     let mut e = Encoder::default();
@@ -30,7 +30,6 @@ fn encode_fields(
         match field {
             ComponentField::CoreModule(m) => e.encode_core_module(m),
             ComponentField::CoreInstance(i) => e.encode_core_instance(i),
-            ComponentField::CoreAlias(a) => e.encode_core_alias(a),
             ComponentField::CoreType(t) => e.encode_core_type(t),
             ComponentField::Component(c) => e.encode_component(c),
             ComponentField::Instance(i) => e.encode_instance(i),
@@ -47,10 +46,8 @@ fn encode_fields(
         }
     }
 
-    // FIXME(WebAssembly/component-model#14): once a name section is defined it
-    // should be encoded here.
-
     e.flush(None);
+    e.encode_names(component_id, component_name);
 
     e.component
 }
@@ -79,11 +76,7 @@ fn encode_type(encoder: ComponentTypeEncoder, ty: &TypeDef) {
         }
         TypeDef::Func(f) => {
             let mut encoder = encoder.function();
-            if f.params.len() == 1 && f.params[0].name.is_none() {
-                encoder.param(&f.params[0].ty);
-            } else {
-                encoder.params(f.params.iter().map(|p| (p.name.unwrap_or(""), &p.ty)));
-            }
+            encoder.params(f.params.iter().map(|p| (p.name, &p.ty)));
 
             if f.results.len() == 1 && f.results[0].name.is_none() {
                 encoder.result(&f.results[0].ty);
@@ -141,14 +134,13 @@ fn encode_defined_type(encoder: ComponentDefinedTypeEncoder, ty: &ComponentDefin
 }
 
 #[derive(Default)]
-struct Encoder {
+struct Encoder<'a> {
     component: wasm_encoder::Component,
     current_section_id: Option<u8>,
 
     // Core sections
     // Note: module sections are written immediately
     core_instances: InstanceSection,
-    core_aliases: AliasSection,
     core_types: CoreTypeSection,
 
     // Component sections
@@ -159,18 +151,34 @@ struct Encoder {
     funcs: CanonicalFunctionSection,
     imports: ComponentImportSection,
     exports: ComponentExportSection,
+
+    core_func_names: Vec<Option<&'a str>>,
+    core_table_names: Vec<Option<&'a str>>,
+    core_memory_names: Vec<Option<&'a str>>,
+    core_global_names: Vec<Option<&'a str>>,
+    core_type_names: Vec<Option<&'a str>>,
+    core_module_names: Vec<Option<&'a str>>,
+    core_instance_names: Vec<Option<&'a str>>,
+    func_names: Vec<Option<&'a str>>,
+    value_names: Vec<Option<&'a str>>,
+    type_names: Vec<Option<&'a str>>,
+    component_names: Vec<Option<&'a str>>,
+    instance_names: Vec<Option<&'a str>>,
 }
 
-impl Encoder {
+impl<'a> Encoder<'a> {
     fn encode_custom(&mut self, custom: &Custom) {
         // Flush any in-progress section before encoding the customs section
         self.flush(None);
         self.component.section(custom);
     }
 
-    fn encode_core_module(&mut self, module: &CoreModule) {
+    fn encode_core_module(&mut self, module: &CoreModule<'a>) {
         // Flush any in-progress section before encoding the module
         self.flush(None);
+
+        self.core_module_names
+            .push(get_name(&module.id, &module.name));
 
         match &module.kind {
             CoreModuleKind::Import { .. } => unreachable!("should be expanded already"),
@@ -185,7 +193,9 @@ impl Encoder {
         }
     }
 
-    fn encode_core_instance(&mut self, instance: &CoreInstance) {
+    fn encode_core_instance(&mut self, instance: &CoreInstance<'a>) {
+        self.core_instance_names
+            .push(get_name(&instance.id, &instance.name));
         match &instance.kind {
             CoreInstanceKind::Instantiate { module, args } => {
                 self.core_instances.instantiate(
@@ -204,31 +214,15 @@ impl Encoder {
         self.flush(Some(self.core_instances.id()));
     }
 
-    fn encode_core_alias(&mut self, alias: &CoreAlias) {
-        match &alias.target {
-            CoreAliasTarget::Export {
-                instance,
-                name,
-                kind,
-            } => {
-                self.core_aliases
-                    .instance_export((*instance).into(), (*kind).into(), name);
-            }
-            CoreAliasTarget::Outer { outer, index, kind } => {
-                self.core_aliases
-                    .outer((*outer).into(), (*kind).into(), (*index).into());
-            }
-        }
-
-        self.flush(Some(self.core_aliases.id()));
-    }
-
-    fn encode_core_type(&mut self, ty: &CoreType) {
+    fn encode_core_type(&mut self, ty: &CoreType<'a>) {
+        self.core_type_names.push(get_name(&ty.id, &ty.name));
         encode_core_type(self.core_types.ty(), &ty.def);
         self.flush(Some(self.core_types.id()));
     }
 
-    fn encode_component(&mut self, component: &NestedComponent) {
+    fn encode_component(&mut self, component: &NestedComponent<'a>) {
+        self.component_names
+            .push(get_name(&component.id, &component.name));
         // Flush any in-progress section before encoding the component
         self.flush(None);
 
@@ -245,7 +239,9 @@ impl Encoder {
         }
     }
 
-    fn encode_instance(&mut self, instance: &Instance) {
+    fn encode_instance(&mut self, instance: &Instance<'a>) {
+        self.instance_names
+            .push(get_name(&instance.id, &instance.name));
         match &instance.kind {
             InstanceKind::Import { .. } => unreachable!("should be expanded already"),
             InstanceKind::Instantiate { component, args } => {
@@ -268,19 +264,18 @@ impl Encoder {
         self.flush(Some(self.instances.id()));
     }
 
-    fn encode_alias(&mut self, alias: &Alias) {
+    fn encode_alias(&mut self, alias: &Alias<'a>) {
+        let name = get_name(&alias.id, &alias.name);
+        self.aliases.alias((&alias.target).into());
         match &alias.target {
-            AliasTarget::Export {
-                instance,
-                name,
-                kind,
-            } => {
-                self.aliases
-                    .instance_export((*instance).into(), (*kind).into(), name);
+            AliasTarget::Export { kind, .. } => {
+                self.names_for_component_export_alias(*kind).push(name);
             }
-            AliasTarget::Outer { outer, index, kind } => {
-                self.aliases
-                    .outer((*outer).into(), (*kind).into(), (*index).into());
+            AliasTarget::CoreExport { kind, .. } => {
+                self.names_for_core_export_alias(*kind).push(name);
+            }
+            AliasTarget::Outer { kind, .. } => {
+                self.names_for_component_outer_alias(*kind).push(name);
             }
         }
 
@@ -294,17 +289,21 @@ impl Encoder {
         self.component.section(&ComponentStartSection {
             function_index: start.func.into(),
             args: start.args.iter().map(|a| a.idx.into()).collect::<Vec<_>>(),
+            results: start.results.len() as u32,
         });
     }
 
-    fn encode_type(&mut self, ty: &Type) {
+    fn encode_type(&mut self, ty: &Type<'a>) {
+        self.type_names.push(get_name(&ty.id, &ty.name));
         encode_type(self.types.ty(), &ty.def);
         self.flush(Some(self.types.id()));
     }
 
-    fn encode_canonical_func(&mut self, func: &CanonicalFunc) {
+    fn encode_canonical_func(&mut self, func: &CanonicalFunc<'a>) {
+        let name = get_name(&func.id, &func.name);
         match &func.kind {
             CanonicalFuncKind::Lift { ty, info } => {
+                self.func_names.push(name);
                 self.funcs.lift(
                     info.func.idx.into(),
                     ty.into(),
@@ -312,6 +311,7 @@ impl Encoder {
                 );
             }
             CanonicalFuncKind::Lower(info) => {
+                self.core_func_names.push(name);
                 self.funcs
                     .lower(info.func.idx.into(), info.opts.iter().map(Into::into));
             }
@@ -320,14 +320,30 @@ impl Encoder {
         self.flush(Some(self.funcs.id()));
     }
 
-    fn encode_import(&mut self, import: &ComponentImport) {
-        self.imports.import(import.name, (&import.item.kind).into());
+    fn encode_import(&mut self, import: &ComponentImport<'a>) {
+        let name = get_name(&import.item.id, &import.item.name);
+        self.names_for_item_kind(&import.item.kind).push(name);
+        self.imports.import(
+            import.name,
+            import.url.unwrap_or(""),
+            (&import.item.kind).into(),
+        );
         self.flush(Some(self.imports.id()));
     }
 
-    fn encode_export(&mut self, export: &ComponentExport) {
+    fn encode_export(&mut self, export: &ComponentExport<'a>) {
+        let name = get_name(&export.id, &export.debug_name);
         let (kind, index) = (&export.kind).into();
-        self.exports.export(export.name, kind, index);
+        self.exports
+            .export(export.name, export.url.unwrap_or(""), kind, index);
+        match &export.kind {
+            ComponentExportKind::CoreModule(_) => self.core_module_names.push(name),
+            ComponentExportKind::Func(_) => self.func_names.push(name),
+            ComponentExportKind::Instance(_) => self.instance_names.push(name),
+            ComponentExportKind::Value(_) => self.value_names.push(name),
+            ComponentExportKind::Component(_) => self.component_names.push(name),
+            ComponentExportKind::Type(_) => self.type_names.push(name),
+        }
         self.flush(Some(self.exports.id()));
     }
 
@@ -346,43 +362,38 @@ impl Encoder {
                     self.core_instances = Default::default();
                 }
                 3 => {
-                    assert_eq!(id, self.core_aliases.id());
-                    self.component.section(&self.core_aliases);
-                    self.core_aliases = Default::default();
-                }
-                4 => {
                     assert_eq!(id, self.core_types.id());
                     self.component.section(&self.core_types);
                     self.core_types = Default::default();
                 }
-                // 5 => components sections are written immediately
-                6 => {
+                // 4 => components sections are written immediately
+                5 => {
                     assert_eq!(id, self.instances.id());
                     self.component.section(&self.instances);
                     self.instances = Default::default();
                 }
-                7 => {
+                6 => {
                     assert_eq!(id, self.aliases.id());
                     self.component.section(&self.aliases);
                     self.aliases = Default::default();
                 }
-                8 => {
+                7 => {
                     assert_eq!(id, self.types.id());
                     self.component.section(&self.types);
                     self.types = Default::default();
                 }
-                9 => {
+                8 => {
                     assert_eq!(id, self.funcs.id());
                     self.component.section(&self.funcs);
                     self.funcs = Default::default();
                 }
-                // 10 => start sections are written immediately
-                11 => {
+                // 9 => start sections are written immediately
+                10 => {
                     assert_eq!(id, self.imports.id());
                     self.component.section(&self.imports);
                     self.imports = Default::default();
                 }
-                12 => {
+                11 => {
                     assert_eq!(id, self.exports.id());
                     self.component.section(&self.exports);
                     self.exports = Default::default();
@@ -393,6 +404,108 @@ impl Encoder {
 
         self.current_section_id = section_id
     }
+
+    fn encode_names(
+        &mut self,
+        component_id: &Option<Id<'_>>,
+        component_name: &Option<NameAnnotation<'_>>,
+    ) {
+        let mut names = ComponentNameSection::new();
+        if let Some(name) = get_name(component_id, component_name) {
+            names.component(name);
+        }
+
+        let mut funcs = |list: &[Option<&str>], append: fn(&mut ComponentNameSection, &NameMap)| {
+            let mut map = NameMap::new();
+            for (i, entry) in list.iter().enumerate() {
+                if let Some(name) = entry {
+                    map.append(i as u32, name);
+                }
+            }
+            if !map.is_empty() {
+                append(&mut names, &map);
+            }
+        };
+
+        funcs(&self.core_func_names, ComponentNameSection::core_funcs);
+        funcs(&self.core_table_names, ComponentNameSection::core_tables);
+        funcs(&self.core_memory_names, ComponentNameSection::core_memories);
+        funcs(&self.core_global_names, ComponentNameSection::core_globals);
+        funcs(&self.core_type_names, ComponentNameSection::core_types);
+        funcs(&self.core_module_names, ComponentNameSection::core_modules);
+        funcs(
+            &self.core_instance_names,
+            ComponentNameSection::core_instances,
+        );
+        funcs(&self.func_names, ComponentNameSection::funcs);
+        funcs(&self.value_names, ComponentNameSection::values);
+        funcs(&self.type_names, ComponentNameSection::types);
+        funcs(&self.component_names, ComponentNameSection::components);
+        funcs(&self.instance_names, ComponentNameSection::instances);
+
+        if !names.is_empty() {
+            self.component.section(&names);
+        }
+    }
+
+    fn names_for_component_export_alias(
+        &mut self,
+        kind: ComponentExportAliasKind,
+    ) -> &mut Vec<Option<&'a str>> {
+        match kind {
+            ComponentExportAliasKind::Func => &mut self.func_names,
+            ComponentExportAliasKind::CoreModule => &mut self.core_module_names,
+            ComponentExportAliasKind::Value => &mut self.value_names,
+            ComponentExportAliasKind::Type => &mut self.type_names,
+            ComponentExportAliasKind::Component => &mut self.component_names,
+            ComponentExportAliasKind::Instance => &mut self.instance_names,
+        }
+    }
+
+    fn names_for_component_outer_alias(
+        &mut self,
+        kind: ComponentOuterAliasKind,
+    ) -> &mut Vec<Option<&'a str>> {
+        match kind {
+            ComponentOuterAliasKind::CoreModule => &mut self.core_module_names,
+            ComponentOuterAliasKind::CoreType => &mut self.core_type_names,
+            ComponentOuterAliasKind::Component => &mut self.component_names,
+            ComponentOuterAliasKind::Type => &mut self.type_names,
+        }
+    }
+
+    fn names_for_core_export_alias(&mut self, kind: core::ExportKind) -> &mut Vec<Option<&'a str>> {
+        match kind {
+            core::ExportKind::Func => &mut self.core_func_names,
+            core::ExportKind::Global => &mut self.core_global_names,
+            core::ExportKind::Table => &mut self.core_table_names,
+            core::ExportKind::Memory => &mut self.core_memory_names,
+            core::ExportKind::Tag => unimplemented!(),
+        }
+    }
+
+    fn names_for_item_kind(&mut self, kind: &ItemSigKind) -> &mut Vec<Option<&'a str>> {
+        match kind {
+            ItemSigKind::CoreModule(_) => &mut self.core_module_names,
+            ItemSigKind::Func(_) => &mut self.func_names,
+            ItemSigKind::Component(_) => &mut self.component_names,
+            ItemSigKind::Instance(_) => &mut self.instance_names,
+            ItemSigKind::Value(_) => &mut self.value_names,
+            ItemSigKind::Type(_) => &mut self.type_names,
+        }
+    }
+}
+
+fn get_name<'a>(id: &Option<Id<'a>>, name: &Option<NameAnnotation<'a>>) -> Option<&'a str> {
+    name.as_ref().map(|n| n.name).or_else(|| {
+        id.and_then(|id| {
+            if id.is_gensym() {
+                None
+            } else {
+                Some(id.name())
+            }
+        })
+    })
 }
 
 // This implementation is much like `wasm_encoder::CustomSection`, except
@@ -659,28 +772,14 @@ impl From<&ComponentType<'_>> for wasm_encoder::ComponentType {
                 ComponentTypeDecl::Type(t) => {
                     encode_type(encoded.ty(), &t.def);
                 }
-                ComponentTypeDecl::Alias(a) => match &a.target {
-                    AliasTarget::Outer {
-                        outer,
-                        index,
-                        kind: ComponentOuterAliasKind::CoreType,
-                    } => {
-                        encoded.alias_outer_core_type(u32::from(*outer), u32::from(*index));
-                    }
-                    AliasTarget::Outer {
-                        outer,
-                        index,
-                        kind: ComponentOuterAliasKind::Type,
-                    } => {
-                        encoded.alias_outer_type(u32::from(*outer), u32::from(*index));
-                    }
-                    _ => unreachable!("only outer type aliases are supported"),
-                },
+                ComponentTypeDecl::Alias(a) => {
+                    encoded.alias((&a.target).into());
+                }
                 ComponentTypeDecl::Import(i) => {
-                    encoded.import(i.name, (&i.item.kind).into());
+                    encoded.import(i.name, i.url.unwrap_or(""), (&i.item.kind).into());
                 }
                 ComponentTypeDecl::Export(e) => {
-                    encoded.export(e.name, (&e.item.kind).into());
+                    encoded.export(e.name, e.url.unwrap_or(""), (&e.item.kind).into());
                 }
             }
         }
@@ -701,25 +800,11 @@ impl From<&InstanceType<'_>> for wasm_encoder::InstanceType {
                 InstanceTypeDecl::Type(t) => {
                     encode_type(encoded.ty(), &t.def);
                 }
-                InstanceTypeDecl::Alias(a) => match &a.target {
-                    AliasTarget::Outer {
-                        outer,
-                        index,
-                        kind: ComponentOuterAliasKind::CoreType,
-                    } => {
-                        encoded.alias_outer_core_type(u32::from(*outer), u32::from(*index));
-                    }
-                    AliasTarget::Outer {
-                        outer,
-                        index,
-                        kind: ComponentOuterAliasKind::Type,
-                    } => {
-                        encoded.alias_outer_type(u32::from(*outer), u32::from(*index));
-                    }
-                    _ => unreachable!("only outer type aliases are supported"),
-                },
+                InstanceTypeDecl::Alias(a) => {
+                    encoded.alias((&a.target).into());
+                }
                 InstanceTypeDecl::Export(e) => {
-                    encoded.export(e.name, (&e.item.kind).into());
+                    encoded.export(e.name, e.url.unwrap_or(""), (&e.item.kind).into());
                 }
             }
         }
@@ -744,10 +829,10 @@ impl From<&ModuleType<'_>> for wasm_encoder::ModuleType {
                     }
                 },
                 ModuleTypeDecl::Alias(a) => match &a.target {
-                    CoreAliasTarget::Outer {
+                    AliasTarget::Outer {
                         outer,
                         index,
-                        kind: CoreOuterAliasKind::Type,
+                        kind: ComponentOuterAliasKind::CoreType,
                     } => {
                         encoded.alias_outer_core_type(u32::from(*outer), u32::from(*index));
                     }
@@ -796,14 +881,6 @@ impl From<&ComponentExportKind<'_>> for (wasm_encoder::ComponentExportKind, u32)
     }
 }
 
-impl From<CoreOuterAliasKind> for wasm_encoder::CoreOuterAliasKind {
-    fn from(kind: CoreOuterAliasKind) -> Self {
-        match kind {
-            CoreOuterAliasKind::Type => Self::Type,
-        }
-    }
-}
-
 impl From<ComponentOuterAliasKind> for wasm_encoder::ComponentOuterAliasKind {
     fn from(kind: ComponentOuterAliasKind) -> Self {
         match kind {
@@ -837,6 +914,36 @@ impl From<&CanonOpt<'_>> for wasm_encoder::CanonicalOption {
             CanonOpt::Memory(m) => Self::Memory(m.idx.into()),
             CanonOpt::Realloc(f) => Self::Realloc(f.idx.into()),
             CanonOpt::PostReturn(f) => Self::PostReturn(f.idx.into()),
+        }
+    }
+}
+
+impl<'a> From<&AliasTarget<'a>> for wasm_encoder::Alias<'a> {
+    fn from(target: &AliasTarget<'a>) -> Self {
+        match target {
+            AliasTarget::Export {
+                instance,
+                name,
+                kind,
+            } => wasm_encoder::Alias::InstanceExport {
+                instance: (*instance).into(),
+                kind: (*kind).into(),
+                name,
+            },
+            AliasTarget::CoreExport {
+                instance,
+                name,
+                kind,
+            } => wasm_encoder::Alias::CoreInstanceExport {
+                instance: (*instance).into(),
+                kind: (*kind).into(),
+                name,
+            },
+            AliasTarget::Outer { outer, index, kind } => wasm_encoder::Alias::Outer {
+                count: (*outer).into(),
+                kind: (*kind).into(),
+                index: (*index).into(),
+            },
         }
     }
 }

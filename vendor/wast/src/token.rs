@@ -161,10 +161,7 @@ impl Index<'_> {
     }
 
     pub(crate) fn is_resolved(&self) -> bool {
-        match self {
-            Index::Num(..) => true,
-            _ => false,
-        }
+        matches!(self, Index::Num(..))
     }
 }
 
@@ -257,7 +254,7 @@ impl<'a, K: Peek> Peek for ItemRef<'a, K> {
 }
 
 /// An `@name` annotation in source, currently of the form `@name "foo"`
-#[derive(Copy, Clone, PartialEq, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub struct NameAnnotation<'a> {
     /// The name specified for the item
     pub name: &'a str,
@@ -353,7 +350,8 @@ impl Peek for &'_ [u8] {
 
 impl<'a> Parse<'a> for &'a str {
     fn parse(parser: Parser<'a>) -> Result<Self> {
-        str::from_utf8(parser.parse()?).map_err(|_| parser.error("malformed UTF-8 encoding"))
+        str::from_utf8(parser.parse()?)
+            .map_err(|_| parser.error_at(parser.prev_span(), "malformed UTF-8 encoding"))
     }
 }
 

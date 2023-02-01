@@ -3,7 +3,7 @@
 # When uploading crates to the registry Cargo will automatically
 # "normalize" Cargo.toml files for maximal compatibility
 # with all versions of Cargo and also rewrite `path` dependencies
-# to registry (e.g. crates.io) dependencies
+# to registry (e.g., crates.io) dependencies
 #
 # If you believe there's an error in this file please file an
 # issue against the rust-lang/cargo repository. If you're
@@ -12,7 +12,7 @@
 
 [package]
 name = "crunchy"
-version = "0.1.6"
+version = "0.2.2"
 authors = ["Vurich <jackefransham@hotmail.co.uk>"]
 build = "build.rs"
 description = "Crunchy unroller: deterministically unroll constant loops"
@@ -21,10 +21,11 @@ license = "MIT"
 [dependencies]
 
 [features]
-limit_2048 = []
-limit_512 = []
-limit_128 = []
-limit_64 = []
-limit_256 = []
 default = ["limit_128"]
 limit_1024 = []
+limit_128 = []
+limit_2048 = []
+limit_256 = []
+limit_512 = []
+limit_64 = []
+std = []

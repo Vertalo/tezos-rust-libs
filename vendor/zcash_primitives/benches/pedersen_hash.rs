@@ -1,23 +1,28 @@
-#![feature(test)]
-
-extern crate pairing;
-extern crate rand_core;
-extern crate test;
-extern crate zcash_primitives;
-
-use pairing::bls12_381::Bls12;
+use criterion::{criterion_group, criterion_main, Criterion};
 use rand_core::{OsRng, RngCore};
-use zcash_primitives::jubjub::JubjubBls12;
-use zcash_primitives::pedersen_hash::{pedersen_hash, Personalization};
+use zcash_primitives::sapling::pedersen_hash::{pedersen_hash, Personalization};
 
-#[bench]
-fn bench_pedersen_hash(b: &mut test::Bencher) {
-    let params = JubjubBls12::new();
+#[cfg(unix)]
+use pprof::criterion::{Output, PProfProfiler};
+
+fn bench_pedersen_hash(c: &mut Criterion) {
     let rng = &mut OsRng;
     let bits = (0..510)
         .map(|_| (rng.next_u32() % 2) != 0)
         .collect::<Vec<_>>();
     let personalization = Personalization::MerkleTree(31);
 
-    b.iter(|| pedersen_hash::<Bls12, _>(personalization, bits.clone(), &params));
+    c.bench_function("pedersen-hash", |b| {
+        b.iter(|| pedersen_hash(personalization, bits.clone()))
+    });
 }
+
+#[cfg(unix)]
+criterion_group! {
+    name = benches;
+    config = Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
+    targets = bench_pedersen_hash
+}
+#[cfg(not(unix))]
+criterion_group!(benches, bench_pedersen_hash);
+criterion_main!(benches);

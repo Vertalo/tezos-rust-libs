@@ -43,6 +43,7 @@ pub struct Pair<'i, R> {
     input: &'i str,
     /// Token index into `queue`.
     start: usize,
+    pub(crate) line_col: Option<(usize, usize)>,
 }
 
 /// # Safety
@@ -52,11 +53,12 @@ pub unsafe fn new<R: RuleType>(
     queue: Rc<Vec<QueueableToken<R>>>,
     input: &str,
     start: usize,
-) -> Pair<R> {
+) -> Pair<'_, R> {
     Pair {
         queue,
         input,
         start,
+        line_col: None,
     }
 }
 
@@ -241,6 +243,14 @@ impl<'i, R: RuleType> Pair<'i, R> {
         ::serde_json::to_string_pretty(self).expect("Failed to pretty-print Pair to json.")
     }
 
+    /// Returns the `line`, `col` of this pair start.
+    pub fn line_col(&self) -> (usize, usize) {
+        match &self.line_col {
+            Some(line_col) => (line_col.0, line_col.1),
+            None => self.as_span().start_pos().line_col(),
+        }
+    }
+
     fn pair(&self) -> usize {
         match self.queue[self.start] {
             QueueableToken::Start {
@@ -268,7 +278,7 @@ impl<'i, R: RuleType> Pairs<'i, R> {
 }
 
 impl<'i, R: RuleType> fmt::Debug for Pair<'i, R> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Pair")
             .field("rule", &self.as_rule())
             .field("span", &self.as_span())
@@ -278,7 +288,7 @@ impl<'i, R: RuleType> fmt::Debug for Pair<'i, R> {
 }
 
 impl<'i, R: RuleType> fmt::Display for Pair<'i, R> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let rule = self.as_rule();
         let start = self.pos(self.start);
         let end = self.pos(self.pair());

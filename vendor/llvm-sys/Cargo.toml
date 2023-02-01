@@ -11,7 +11,7 @@
 
 [package]
 name = "llvm-sys"
-version = "120.2.4"
+version = "120.2.5"
 authors = ["Peter Marheine <peter@taricorp.net>"]
 build = "build.rs"
 links = "llvm-12"

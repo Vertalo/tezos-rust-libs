@@ -4,7 +4,10 @@
 
 ## Disclaimers
 
-* This library does not provide constant-time guarantees.
+* This library does not provide constant-time guarantees. The traits enable downstream
+  users to expose constant-time logic, but `#[derive(PrimeField)]` in particular does not
+  generate constant-time code (even for trait methods that return constant-time-compatible
+  values).
 
 ## Usage
 
@@ -12,10 +15,10 @@ Add the `ff` crate to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-ff = "0.5"
+ff = "0.12"
 ```
 
-The `ff` crate contains `Field`, `PrimeField`, `PrimeFieldRepr` and `SqrtField` traits.
+The `ff` crate contains the `Field` and `PrimeField` traits.
 See the **[documentation](https://docs.rs/ff/)** for more.
 
 ### #![derive(PrimeField)]
@@ -29,25 +32,30 @@ First, enable the `derive` crate feature:
 
 ```toml
 [dependencies]
-ff = { version = "0.4", features = ["derive"] }
+ff = { version = "0.12", features = ["derive"] }
 ```
 
 And then use the macro like so:
 
 ```rust
-extern crate rand;
 #[macro_use]
 extern crate ff;
 
 #[derive(PrimeField)]
 #[PrimeFieldModulus = "52435875175126190479447740508185965837690552500527637822603658699938581184513"]
 #[PrimeFieldGenerator = "7"]
-struct Fp(FpRepr);
+#[PrimeFieldReprEndianness = "little"]
+struct Fp([u64; 4]);
 ```
 
-And that's it! `Fp` now implements `Field` and `PrimeField`. `Fp` will also implement
-`SqrtField` if supported. The library implements `FpRepr` itself and derives
-`PrimeFieldRepr` for it.
+And that's it! `Fp` now implements `Field` and `PrimeField`.
+
+## Minimum Supported Rust Version
+
+Requires Rust **1.56** or higher.
+
+Minimum supported Rust version can be changed in the future, but it will be done with a
+minor version bump.
 
 ## License
 

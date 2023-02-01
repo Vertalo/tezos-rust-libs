@@ -1,23 +1,66 @@
 //! This crate provides traits for working with finite fields.
 
 // Catch documentation errors caused by code changes.
-#![deny(intra_doc_link_resolution_failure)]
-#![allow(unused_imports)]
+#![no_std]
+#![cfg_attr(docsrs, feature(doc_cfg))]
+#![deny(rustdoc::broken_intra_doc_links)]
+#![forbid(unsafe_code)]
+
+#[cfg(feature = "alloc")]
+extern crate alloc;
+
+mod batch;
+pub use batch::*;
 
 #[cfg(feature = "derive")]
-pub use ff_derive::*;
+#[cfg_attr(docsrs, doc(cfg(feature = "derive")))]
+pub use ff_derive::PrimeField;
 
+#[cfg(feature = "bits")]
+#[cfg_attr(docsrs, doc(cfg(feature = "bits")))]
+pub use bitvec::view::BitViewSized;
+
+#[cfg(feature = "bits")]
+use bitvec::{array::BitArray, order::Lsb0};
+use core::fmt;
+use core::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 use rand_core::RngCore;
-use std::error::Error;
-use std::fmt;
-use std::io::{self, Read, Write};
+use subtle::{Choice, ConditionallySelectable, ConstantTimeEq, CtOption};
+
+/// Bit representation of a field element.
+#[cfg(feature = "bits")]
+#[cfg_attr(docsrs, doc(cfg(feature = "bits")))]
+pub type FieldBits<V> = BitArray<V, Lsb0>;
 
 /// This trait represents an element of a field.
 pub trait Field:
-    Sized + Eq + Copy + Clone + Send + Sync + fmt::Debug + fmt::Display + 'static
+    Sized
+    + Eq
+    + Copy
+    + Clone
+    + Default
+    + Send
+    + Sync
+    + fmt::Debug
+    + 'static
+    + ConditionallySelectable
+    + ConstantTimeEq
+    + Add<Output = Self>
+    + Sub<Output = Self>
+    + Mul<Output = Self>
+    + Neg<Output = Self>
+    + for<'a> Add<&'a Self, Output = Self>
+    + for<'a> Mul<&'a Self, Output = Self>
+    + for<'a> Sub<&'a Self, Output = Self>
+    + MulAssign
+    + AddAssign
+    + SubAssign
+    + for<'a> MulAssign<&'a Self>
+    + for<'a> AddAssign<&'a Self>
+    + for<'a> SubAssign<&'a Self>
 {
     /// Returns an element chosen uniformly at random using a user-provided RNG.
-    fn random<R: RngCore + ?std::marker::Sized>(rng: &mut R) -> Self;
+    fn random(rng: impl RngCore) -> Self;
 
     /// Returns the zero element of the field, the additive identity.
     fn zero() -> Self;
@@ -26,49 +69,56 @@ pub trait Field:
     fn one() -> Self;
 
     /// Returns true iff this element is zero.
-    fn is_zero(&self) -> bool;
+    fn is_zero(&self) -> Choice {
+        self.ct_eq(&Self::zero())
+    }
+
+    /// Returns true iff this element is zero.
+    ///
+    /// # Security
+    ///
+    /// This method provides **no** constant-time guarantees. Implementors of the
+    /// `Field` trait **may** optimise this method using non-constant-time logic.
+    fn is_zero_vartime(&self) -> bool {
+        self.is_zero().into()
+    }
 
     /// Squares this element.
-    fn square(&mut self);
+    #[must_use]
+    fn square(&self) -> Self;
+
+    /// Cubes this element.
+    #[must_use]
+    fn cube(&self) -> Self {
+        self.square() * self
+    }
 
     /// Doubles this element.
-    fn double(&mut self);
+    #[must_use]
+    fn double(&self) -> Self;
 
-    /// Negates this element.
-    fn negate(&mut self);
+    /// Computes the multiplicative inverse of this element,
+    /// failing if the element is zero.
+    fn invert(&self) -> CtOption<Self>;
 
-    /// Adds another element to this element.
-    fn add_assign(&mut self, other: &Self);
+    /// Returns the square root of the field element, if it is
+    /// quadratic residue.
+    fn sqrt(&self) -> CtOption<Self>;
 
-    /// Subtracts another element from this element.
-    fn sub_assign(&mut self, other: &Self);
-
-    /// Multiplies another element by this element.
-    fn mul_assign(&mut self, other: &Self);
-
-    /// Computes the multiplicative inverse of this element, if nonzero.
-    fn inverse(&self) -> Option<Self>;
-
-    /// Exponentiates this element by a power of the base prime modulus via
-    /// the Frobenius automorphism.
-    fn frobenius_map(&mut self, power: usize);
-
-    /// Exponentiates this element by a number represented with `u64` limbs,
-    /// least significant digit first.
-    fn pow<S: AsRef<[u64]>>(&self, exp: S) -> Self {
+    /// Exponentiates `self` by `exp`, where `exp` is a little-endian order
+    /// integer exponent.
+    ///
+    /// **This operation is variable time with respect to the exponent.** If the
+    /// exponent is fixed, this operation is effectively constant time.
+    fn pow_vartime<S: AsRef<[u64]>>(&self, exp: S) -> Self {
         let mut res = Self::one();
+        for e in exp.as_ref().iter().rev() {
+            for i in (0..64).rev() {
+                res = res.square();
 
-        let mut found_one = false;
-
-        for i in BitIterator::new(exp) {
-            if found_one {
-                res.square();
-            } else {
-                found_one = i;
-            }
-
-            if i {
-                res.mul_assign(self);
+                if ((*e >> i) & 1) == 1 {
+                    res.mul_assign(self);
+                }
             }
         }
 
@@ -76,155 +126,19 @@ pub trait Field:
     }
 }
 
-/// This trait represents an element of a field that has a square root operation described for it.
-pub trait SqrtField: Field {
-    /// Returns the Legendre symbol of the field element.
-    fn legendre(&self) -> LegendreSymbol;
-
-    /// Returns the square root of the field element, if it is
-    /// quadratic residue.
-    fn sqrt(&self) -> Option<Self>;
-}
-
-/// This trait represents a wrapper around a biginteger which can encode any element of a particular
-/// prime field. It is a smart wrapper around a sequence of `u64` limbs, least-significant digit
-/// first.
-pub trait PrimeFieldRepr:
-    Sized
-    + Copy
-    + Clone
-    + Eq
-    + Ord
-    + Send
-    + Sync
-    + Default
-    + fmt::Debug
-    + fmt::Display
-    + 'static
-    + AsRef<[u64]>
-    + AsMut<[u64]>
-    + From<u64>
-{
-    /// Subtract another represetation from this one.
-    fn sub_noborrow(&mut self, other: &Self);
-
-    /// Add another representation to this one.
-    fn add_nocarry(&mut self, other: &Self);
-
-    /// Compute the number of bits needed to encode this number. Always a
-    /// multiple of 64.
-    fn num_bits(&self) -> u32;
-
-    /// Returns true iff this number is zero.
-    fn is_zero(&self) -> bool;
-
-    /// Returns true iff this number is odd.
-    fn is_odd(&self) -> bool;
-
-    /// Returns true iff this number is even.
-    fn is_even(&self) -> bool;
-
-    /// Performs a rightwise bitshift of this number, effectively dividing
-    /// it by 2.
-    fn div2(&mut self);
-
-    /// Performs a rightwise bitshift of this number by some amount.
-    fn shr(&mut self, amt: u32);
-
-    /// Performs a leftwise bitshift of this number, effectively multiplying
-    /// it by 2. Overflow is ignored.
-    fn mul2(&mut self);
-
-    /// Performs a leftwise bitshift of this number by some amount.
-    fn shl(&mut self, amt: u32);
-
-    /// Writes this `PrimeFieldRepr` as a big endian integer.
-    fn write_be<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        use byteorder::{BigEndian, WriteBytesExt};
-
-        for digit in self.as_ref().iter().rev() {
-            writer.write_u64::<BigEndian>(*digit)?;
-        }
-
-        Ok(())
-    }
-
-    /// Reads a big endian integer into this representation.
-    fn read_be<R: Read>(&mut self, mut reader: R) -> io::Result<()> {
-        use byteorder::{BigEndian, ReadBytesExt};
-
-        for digit in self.as_mut().iter_mut().rev() {
-            *digit = reader.read_u64::<BigEndian>()?;
-        }
-
-        Ok(())
-    }
-
-    /// Writes this `PrimeFieldRepr` as a little endian integer.
-    fn write_le<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        use byteorder::{LittleEndian, WriteBytesExt};
-
-        for digit in self.as_ref().iter() {
-            writer.write_u64::<LittleEndian>(*digit)?;
-        }
-
-        Ok(())
-    }
-
-    /// Reads a little endian integer into this representation.
-    fn read_le<R: Read>(&mut self, mut reader: R) -> io::Result<()> {
-        use byteorder::{LittleEndian, ReadBytesExt};
-
-        for digit in self.as_mut().iter_mut() {
-            *digit = reader.read_u64::<LittleEndian>()?;
-        }
-
-        Ok(())
-    }
-}
-
-#[derive(Debug, PartialEq)]
-pub enum LegendreSymbol {
-    Zero = 0,
-    QuadraticResidue = 1,
-    QuadraticNonResidue = -1,
-}
-
-/// An error that may occur when trying to interpret a `PrimeFieldRepr` as a
-/// `PrimeField` element.
-#[derive(Debug)]
-pub enum PrimeFieldDecodingError {
-    /// The encoded value is not in the field
-    NotInField(String),
-}
-
-impl Error for PrimeFieldDecodingError {
-    fn description(&self) -> &str {
-        match *self {
-            PrimeFieldDecodingError::NotInField(..) => "not an element of the field",
-        }
-    }
-}
-
-impl fmt::Display for PrimeFieldDecodingError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        match *self {
-            PrimeFieldDecodingError::NotInField(ref repr) => {
-                write!(f, "{} is not an element of the field", repr)
-            }
-        }
-    }
-}
-
 /// This represents an element of a prime field.
-pub trait PrimeField: Field {
-    /// The prime field can be converted back and forth into this biginteger
+pub trait PrimeField: Field + From<u64> {
+    /// The prime field can be converted back and forth into this binary
     /// representation.
-    type Repr: PrimeFieldRepr + From<Self>;
+    type Repr: Copy + Default + Send + Sync + 'static + AsRef<[u8]> + AsMut<[u8]>;
 
     /// Interpret a string of numbers as a (congruent) prime field element.
     /// Does not accept unnecessary leading zeroes or a blank string.
-    fn from_str(s: &str) -> Option<Self> {
+    ///
+    /// # Security
+    ///
+    /// This method provides **no** constant-time guarantees.
+    fn from_str_vartime(s: &str) -> Option<Self> {
         if s.is_empty() {
             return None;
         }
@@ -235,7 +149,7 @@ pub trait PrimeField: Field {
 
         let mut res = Self::zero();
 
-        let ten = Self::from_repr(Self::Repr::from(10)).unwrap();
+        let ten = Self::from(10);
 
         let mut first_digit = true;
 
@@ -251,7 +165,7 @@ pub trait PrimeField: Field {
                     }
 
                     res.mul_assign(&ten);
-                    res.add_assign(&Self::from_repr(Self::Repr::from(u64::from(c))).unwrap());
+                    res.add_assign(&Self::from(u64::from(c)));
                 }
                 None => {
                     return None;
@@ -262,132 +176,123 @@ pub trait PrimeField: Field {
         Some(res)
     }
 
-    /// Convert this prime field element into a biginteger representation.
-    fn from_repr(_: Self::Repr) -> Result<Self, PrimeFieldDecodingError>;
+    /// Attempts to convert a byte representation of a field element into an element of
+    /// this prime field, failing if the input is not canonical (is not smaller than the
+    /// field's modulus).
+    ///
+    /// The byte representation is interpreted with the same endianness as elements
+    /// returned by [`PrimeField::to_repr`].
+    fn from_repr(repr: Self::Repr) -> CtOption<Self>;
 
-    /// Convert a biginteger representation into a prime field element, if
-    /// the number is an element of the field.
-    fn into_repr(&self) -> Self::Repr;
+    /// Attempts to convert a byte representation of a field element into an element of
+    /// this prime field, failing if the input is not canonical (is not smaller than the
+    /// field's modulus).
+    ///
+    /// The byte representation is interpreted with the same endianness as elements
+    /// returned by [`PrimeField::to_repr`].
+    ///
+    /// # Security
+    ///
+    /// This method provides **no** constant-time guarantees. Implementors of the
+    /// `PrimeField` trait **may** optimise this method using non-constant-time logic.
+    fn from_repr_vartime(repr: Self::Repr) -> Option<Self> {
+        Self::from_repr(repr).into()
+    }
 
-    /// Returns the field characteristic; the modulus.
-    fn char() -> Self::Repr;
+    /// Converts an element of the prime field into the standard byte representation for
+    /// this field.
+    ///
+    /// The endianness of the byte representation is implementation-specific. Generic
+    /// encodings of field elements should be treated as opaque.
+    fn to_repr(&self) -> Self::Repr;
+
+    /// Returns true iff this element is odd.
+    fn is_odd(&self) -> Choice;
+
+    /// Returns true iff this element is even.
+    #[inline(always)]
+    fn is_even(&self) -> Choice {
+        !self.is_odd()
+    }
 
     /// How many bits are needed to represent an element of this field.
     const NUM_BITS: u32;
 
     /// How many bits of information can be reliably stored in the field element.
+    ///
+    /// This is usually `Self::NUM_BITS - 1`.
     const CAPACITY: u32;
 
-    /// Returns the multiplicative generator of `char()` - 1 order. This element
-    /// must also be quadratic nonresidue.
+    /// Returns a fixed multiplicative generator of `modulus - 1` order. This element must
+    /// also be a quadratic nonresidue.
+    ///
+    /// It can be calculated using [SageMath] as `GF(modulus).primitive_element()`.
+    ///
+    /// Implementations of this method MUST ensure that this is the generator used to
+    /// derive `Self::root_of_unity`.
+    ///
+    /// [SageMath]: https://www.sagemath.org/
     fn multiplicative_generator() -> Self;
 
-    /// 2^s * t = `char()` - 1 with t odd.
+    /// An integer `s` satisfying the equation `2^s * t = modulus - 1` with `t` odd.
+    ///
+    /// This is the number of leading zero bits in the little-endian bit representation of
+    /// `modulus - 1`.
     const S: u32;
 
-    /// Returns the 2^s root of unity computed by exponentiating the `multiplicative_generator()`
-    /// by t.
+    /// Returns the `2^s` root of unity.
+    ///
+    /// It can be calculated by exponentiating `Self::multiplicative_generator` by `t`,
+    /// where `t = (modulus - 1) >> Self::S`.
     fn root_of_unity() -> Self;
 }
 
-/// An "engine" is a collection of types (fields, elliptic curve groups, etc.)
-/// with well-defined relationships. Specific relationships (for example, a
-/// pairing-friendly curve) can be defined in a subtrait.
-pub trait ScalarEngine: Sized + 'static + Clone {
-    /// This is the scalar field of the engine's groups.
-    type Fr: PrimeField + SqrtField;
+/// This represents the bits of an element of a prime field.
+#[cfg(feature = "bits")]
+#[cfg_attr(docsrs, doc(cfg(feature = "bits")))]
+pub trait PrimeFieldBits: PrimeField {
+    /// The backing store for a bit representation of a prime field element.
+    type ReprBits: BitViewSized + Send + Sync;
+
+    /// Converts an element of the prime field into a little-endian sequence of bits.
+    fn to_le_bits(&self) -> FieldBits<Self::ReprBits>;
+
+    /// Returns the bits of the field characteristic (the modulus) in little-endian order.
+    fn char_le_bits() -> FieldBits<Self::ReprBits>;
 }
 
-#[derive(Debug)]
-pub struct BitIterator<E> {
-    t: E,
-    n: usize,
+/// Functions and re-exported crates used by the [`PrimeField`] derive macro.
+#[cfg(feature = "derive")]
+#[cfg_attr(docsrs, doc(cfg(feature = "derive")))]
+pub mod derive {
+    pub use crate::arith_impl::*;
+
+    pub use {byteorder, rand_core, subtle};
+
+    #[cfg(feature = "bits")]
+    pub use bitvec;
 }
 
-impl<E: AsRef<[u64]>> BitIterator<E> {
-    pub fn new(t: E) -> Self {
-        let n = t.as_ref().len() * 64;
-
-        BitIterator { t, n }
-    }
-}
-
-impl<E: AsRef<[u64]>> Iterator for BitIterator<E> {
-    type Item = bool;
-
-    fn next(&mut self) -> Option<bool> {
-        if self.n == 0 {
-            None
-        } else {
-            self.n -= 1;
-            let part = self.n / 64;
-            let bit = self.n - (64 * part);
-
-            Some(self.t.as_ref()[part] & (1 << bit) > 0)
-        }
-    }
-}
-
-#[test]
-fn test_bit_iterator() {
-    let mut a = BitIterator::new([0xa953d79b83f6ab59, 0x6dea2059e200bd39]);
-    let expected = "01101101111010100010000001011001111000100000000010111101001110011010100101010011110101111001101110000011111101101010101101011001";
-
-    for e in expected.chars() {
-        assert!(a.next().unwrap() == (e == '1'));
-    }
-
-    assert!(a.next().is_none());
-
-    let expected = "1010010101111110101010000101101011101000011101110101001000011001100100100011011010001011011011010001011011101100110100111011010010110001000011110100110001100110011101101000101100011100100100100100001010011101010111110011101011000011101000111011011101011001";
-
-    let mut a = BitIterator::new([
-        0x429d5f3ac3a3b759,
-        0xb10f4c66768b1c92,
-        0x92368b6d16ecd3b4,
-        0xa57ea85ae8775219,
-    ]);
-
-    for e in expected.chars() {
-        assert!(a.next().unwrap() == (e == '1'));
-    }
-
-    assert!(a.next().is_none());
-}
-
-pub use self::arith_impl::*;
-
+#[cfg(feature = "derive")]
 mod arith_impl {
-    /// Calculate a - b - borrow, returning the result and modifying
-    /// the borrow value.
+    /// Computes `a - (b + borrow)`, returning the result and the new borrow.
     #[inline(always)]
-    pub fn sbb(a: u64, b: u64, borrow: &mut u64) -> u64 {
-        let tmp = (1u128 << 64) + u128::from(a) - u128::from(b) - u128::from(*borrow);
-
-        *borrow = if tmp >> 64 == 0 { 1 } else { 0 };
-
-        tmp as u64
+    pub const fn sbb(a: u64, b: u64, borrow: u64) -> (u64, u64) {
+        let ret = (a as u128).wrapping_sub((b as u128) + ((borrow >> 63) as u128));
+        (ret as u64, (ret >> 64) as u64)
     }
 
-    /// Calculate a + b + carry, returning the sum and modifying the
-    /// carry value.
+    /// Computes `a + b + carry`, returning the result and the new carry over.
     #[inline(always)]
-    pub fn adc(a: u64, b: u64, carry: &mut u64) -> u64 {
-        let tmp = u128::from(a) + u128::from(b) + u128::from(*carry);
-
-        *carry = (tmp >> 64) as u64;
-
-        tmp as u64
+    pub const fn adc(a: u64, b: u64, carry: u64) -> (u64, u64) {
+        let ret = (a as u128) + (b as u128) + (carry as u128);
+        (ret as u64, (ret >> 64) as u64)
     }
 
-    /// Calculate a + (b * c) + carry, returning the least significant digit
-    /// and setting carry to the most significant digit.
+    /// Computes `a + (b * c) + carry`, returning the result and the new carry over.
     #[inline(always)]
-    pub fn mac_with_carry(a: u64, b: u64, c: u64, carry: &mut u64) -> u64 {
-        let tmp = (u128::from(a)) + u128::from(b) * u128::from(c) + u128::from(*carry);
-
-        *carry = (tmp >> 64) as u64;
-
-        tmp as u64
+    pub const fn mac(a: u64, b: u64, c: u64, carry: u64) -> (u64, u64) {
+        let ret = (a as u128) + ((b as u128) * (c as u128)) + (carry as u128);
+        (ret as u64, (ret >> 64) as u64)
     }
 }

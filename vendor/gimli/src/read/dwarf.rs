@@ -9,11 +9,11 @@ use crate::common::{
 };
 use crate::constants;
 use crate::read::{
-    Abbreviations, AttributeValue, DebugAbbrev, DebugAddr, DebugAranges, DebugCuIndex, DebugInfo,
-    DebugInfoUnitHeadersIter, DebugLine, DebugLineStr, DebugLoc, DebugLocLists, DebugRngLists,
-    DebugStr, DebugStrOffsets, DebugTuIndex, DebugTypes, DebugTypesUnitHeadersIter,
-    DebuggingInformationEntry, EntriesCursor, EntriesRaw, EntriesTree, Error,
-    IncompleteLineProgram, LocListIter, LocationLists, Range, RangeLists, RawLocListIter,
+    Abbreviations, AbbreviationsCache, AttributeValue, DebugAbbrev, DebugAddr, DebugAranges,
+    DebugCuIndex, DebugInfo, DebugInfoUnitHeadersIter, DebugLine, DebugLineStr, DebugLoc,
+    DebugLocLists, DebugRngLists, DebugStr, DebugStrOffsets, DebugTuIndex, DebugTypes,
+    DebugTypesUnitHeadersIter, DebuggingInformationEntry, EntriesCursor, EntriesRaw, EntriesTree,
+    Error, IncompleteLineProgram, LocListIter, LocationLists, Range, RangeLists, RawLocListIter,
     RawRngListIter, Reader, ReaderOffset, ReaderOffsetId, Result, RngListIter, Section, UnitHeader,
     UnitIndex, UnitIndexSectionIterator, UnitOffset, UnitType,
 };
@@ -59,6 +59,9 @@ pub struct Dwarf<R> {
 
     /// The DWARF sections for a supplementary object file.
     pub sup: Option<Arc<Dwarf<R>>>,
+
+    /// A cache of previously parsed abbreviations for units in this file.
+    pub abbreviations_cache: AbbreviationsCache,
 }
 
 impl<T> Dwarf<T> {
@@ -96,6 +99,7 @@ impl<T> Dwarf<T> {
             ranges: RangeLists::new(debug_ranges, debug_rnglists),
             file_type: DwarfFileType::Main,
             sup: None,
+            abbreviations_cache: AbbreviationsCache::new(),
         })
     }
 
@@ -157,6 +161,7 @@ impl<T> Dwarf<T> {
             ranges: self.ranges.borrow(&mut borrow),
             file_type: self.file_type,
             sup: self.sup().map(|sup| Arc::new(sup.borrow(borrow))),
+            abbreviations_cache: AbbreviationsCache::new(),
         }
     }
 
@@ -192,10 +197,10 @@ impl<R: Reader> Dwarf<R> {
     }
 
     /// Parse the abbreviations for a compilation unit.
-    // TODO: provide caching of abbreviations
     #[inline]
-    pub fn abbreviations(&self, unit: &UnitHeader<R>) -> Result<Abbreviations> {
-        unit.abbreviations(&self.debug_abbrev)
+    pub fn abbreviations(&self, unit: &UnitHeader<R>) -> Result<Arc<Abbreviations>> {
+        self.abbreviations_cache
+            .get(&self.debug_abbrev, unit.debug_abbrev_offset())
     }
 
     /// Return the string offset at the given index.
@@ -566,6 +571,22 @@ impl<R: Reader> Dwarf<R> {
     }
 }
 
+impl<R: Clone> Dwarf<R> {
+    /// Assuming `self` was loaded from a .dwo, take the appropriate
+    /// sections from `parent` (which contains the skeleton unit for this
+    /// dwo) such as `.debug_addr` and merge them into this `Dwarf`.
+    pub fn make_dwo(&mut self, parent: &Dwarf<R>) {
+        self.file_type = DwarfFileType::Dwo;
+        // These sections are always taken from the parent file and not the dwo.
+        self.debug_addr = parent.debug_addr.clone();
+        // .debug_rnglists comes from the DWO, .debug_ranges comes from the
+        // parent file.
+        self.ranges
+            .set_debug_ranges(parent.ranges.debug_ranges().clone());
+        self.sup = parent.sup.clone();
+    }
+}
+
 /// The sections from a `.dwp` file.
 #[derive(Debug)]
 pub struct DwarfPackage<R: Reader> {
@@ -782,7 +803,8 @@ impl<R: Reader> DwarfPackage<R> {
             locations: LocationLists::new(debug_loc, debug_loclists),
             ranges: RangeLists::new(debug_ranges, debug_rnglists),
             file_type: DwarfFileType::Dwo,
-            sup: None,
+            sup: parent.sup.clone(),
+            abbreviations_cache: AbbreviationsCache::new(),
         })
     }
 }
@@ -799,7 +821,7 @@ where
     pub header: UnitHeader<R, Offset>,
 
     /// The parsed abbreviations for the unit.
-    pub abbreviations: Abbreviations,
+    pub abbreviations: Arc<Abbreviations>,
 
     /// The `DW_AT_name` attribute of the unit.
     pub name: Option<R>,
@@ -833,7 +855,7 @@ impl<R: Reader> Unit<R> {
     /// Construct a new `Unit` from the given unit header.
     #[inline]
     pub fn new(dwarf: &Dwarf<R>, header: UnitHeader<R>) -> Result<Self> {
-        let abbreviations = header.abbreviations(&dwarf.debug_abbrev)?;
+        let abbreviations = dwarf.abbreviations(&header)?;
         let mut unit = Unit {
             abbreviations,
             name: None,
@@ -988,6 +1010,25 @@ impl<R: Reader> Unit<R> {
         self.addr_base = other.addr_base;
         if self.header.version() < 5 {
             self.rnglists_base = other.rnglists_base;
+        }
+    }
+
+    /// Find the dwo name (if any) for this unit, automatically handling the differences
+    /// between the standardized DWARF 5 split DWARF format and the pre-DWARF 5 GNU
+    /// extension.
+    ///
+    /// The returned value is relative to this unit's `comp_dir`.
+    pub fn dwo_name(&self) -> Result<Option<AttributeValue<R>>> {
+        let mut entries = self.entries();
+        if let None = entries.next_entry()? {
+            return Ok(None);
+        }
+
+        let entry = entries.current().unwrap();
+        if self.header.version() < 5 {
+            entry.attr_value(constants::DW_AT_GNU_dwo_name)
+        } else {
+            entry.attr_value(constants::DW_AT_dwo_name)
         }
     }
 }

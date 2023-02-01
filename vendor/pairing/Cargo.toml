@@ -3,42 +3,26 @@
 # When uploading crates to the registry Cargo will automatically
 # "normalize" Cargo.toml files for maximal compatibility
 # with all versions of Cargo and also rewrite `path` dependencies
-# to registry (e.g., crates.io) dependencies
+# to registry (e.g., crates.io) dependencies.
 #
-# If you believe there's an error in this file please file an
-# issue against the rust-lang/cargo repository. If you're
-# editing this file be aware that the upstream Cargo.toml
-# will likely look very different (and much more reasonable)
+# If you are reading this file be aware that the original Cargo.toml
+# will likely look very different (and much more reasonable).
+# See Cargo.toml.orig for the original contents.
 
 [package]
-edition = "2018"
+edition = "2021"
 name = "pairing"
-version = "0.16.0"
+version = "0.22.0"
 authors = ["Sean Bowe <ewillbefull@gmail.com>", "Jack Grigg <jack@z.cash>"]
 description = "Pairing-friendly elliptic curve library"
-homepage = "https://github.com/ebfull/pairing"
+homepage = "https://github.com/zkcrypto/pairing"
 documentation = "https://docs.rs/pairing/"
 readme = "README.md"
 license = "MIT/Apache-2.0"
-repository = "https://github.com/ebfull/pairing"
-[dependencies.byteorder]
-version = "1"
-
-[dependencies.ff]
-version = "0.6"
-features = ["derive"]
-
+repository = "https://github.com/zkcrypto/pairing"
+resolver = "2"
 [dependencies.group]
-version = "0.6"
-
-[dependencies.rand_core]
-version = "0.5"
-[dev-dependencies.rand_xorshift]
-version = "0.2"
-
-[features]
-default = []
-expose-arith = []
-unstable-features = ["expose-arith"]
+version = "0.12"
+default-features = false
 [badges.maintenance]
 status = "actively-developed"

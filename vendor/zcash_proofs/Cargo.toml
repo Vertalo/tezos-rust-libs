@@ -3,55 +3,99 @@
 # When uploading crates to the registry Cargo will automatically
 # "normalize" Cargo.toml files for maximal compatibility
 # with all versions of Cargo and also rewrite `path` dependencies
-# to registry (e.g., crates.io) dependencies
+# to registry (e.g., crates.io) dependencies.
 #
-# If you believe there's an error in this file please file an
-# issue against the rust-lang/cargo repository. If you're
-# editing this file be aware that the upstream Cargo.toml
-# will likely look very different (and much more reasonable)
+# If you are reading this file be aware that the original Cargo.toml
+# will likely look very different (and much more reasonable).
+# See Cargo.toml.orig for the original contents.
 
 [package]
 edition = "2018"
 name = "zcash_proofs"
-version = "0.2.0"
+version = "0.6.0"
 authors = ["Jack Grigg <jack@z.cash>"]
 description = "Zcash zk-SNARK circuits and proving APIs"
 homepage = "https://github.com/zcash/librustzcash"
 readme = "README.md"
+categories = ["cryptography::cryptocurrencies"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/zcash/librustzcash"
+[package.metadata.docs.rs]
+all-features = true
+
+[lib]
+bench = false
+
+[[example]]
+name = "get-params-path"
+required-features = ["directories"]
+
+[[example]]
+name = "download-params"
+required-features = ["download-params"]
+
+[[bench]]
+name = "sapling"
+harness = false
+required-features = ["local-prover"]
 [dependencies.bellman]
-version = "0.6"
+version = "0.13"
 features = ["groth16"]
 default-features = false
 
 [dependencies.blake2b_simd]
-version = "0.5"
+version = "1"
+
+[dependencies.bls12_381]
+version = "0.7"
 
 [dependencies.byteorder]
 version = "1"
 
 [dependencies.directories]
-version = "1"
+version = "4"
 optional = true
 
 [dependencies.ff]
-version = "0.6"
+version = "0.12"
 
-[dependencies.pairing]
-version = "0.16"
+[dependencies.group]
+version = "0.12"
+
+[dependencies.jubjub]
+version = "0.9"
+
+[dependencies.lazy_static]
+version = "1"
+
+[dependencies.minreq]
+version = "2"
+features = ["https"]
+optional = true
 
 [dependencies.rand_core]
-version = "0.5.1"
+version = "0.6"
+
+[dependencies.wagyu-zcash-parameters]
+version = "0.2"
+optional = true
 
 [dependencies.zcash_primitives]
-version = "0.2"
+version = "0.6"
+[dev-dependencies.criterion]
+version = "0.3"
+
 [dev-dependencies.rand_xorshift]
-version = "0.2"
+version = "0.3"
 
 [features]
+bundled-prover = ["wagyu-zcash-parameters"]
 default = ["local-prover", "multicore"]
+download-params = ["minreq"]
 local-prover = ["directories"]
 multicore = ["bellman/multicore"]
+[target."cfg(unix)".dev-dependencies.pprof]
+version = "0.8"
+features = ["criterion", "flamegraph"]
 [badges.maintenance]
 status = "actively-developed"

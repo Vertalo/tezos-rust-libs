@@ -2,15 +2,10 @@
 
 `pairing` is a crate for using pairing-friendly elliptic curves.
 
-Currently, only the [BLS12-381](https://z.cash/blog/new-snark-curve.html)
-construction is implemented.
+`pairing` provides basic traits for pairing-friendly elliptic curve constructions.
+Specific curves are implemented in separate crates:
 
-## Roadmap
-
-`pairing` is being refactored into a generic library for working with
-pairing-friendly curves. After the refactor, `pairing` will provide basic traits
-for pairing-friendly elliptic curve constructions, while specific curves will be
-in separate crates.
+- [`bls12_381`](https://crates.io/crates/bls12_381) - the BLS12-381 curve.
 
 ## [Documentation](https://docs.rs/pairing/)
 
@@ -20,6 +15,13 @@ Bring the `pairing` crate into your project just as you normally would.
 
 This library does not make any guarantees about constant-time operations, memory
 access patterns, or resistance to side-channel attacks.
+
+## Minimum Supported Rust Version
+
+Requires Rust **1.56** or higher.
+
+Minimum supported Rust version can be changed in the future, but it will be done with a
+minor version bump.
 
 ## License
 

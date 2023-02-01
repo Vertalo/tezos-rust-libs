@@ -1,8 +1,8 @@
-use zcash_history::{Entry, EntryLink, NodeData, Tree};
+use zcash_history::{Entry, EntryLink, NodeData, Tree, V1};
 
 pub struct NodeDataIterator {
     return_stack: Vec<NodeData>,
-    tree: Tree,
+    tree: Tree<V1>,
     cursor: usize,
     leaf_cursor: usize,
 }
@@ -19,7 +19,7 @@ impl Iterator for NodeDataIterator {
             Some(leaf(2))
         } else if self.cursor == 3 {
             Some(self.tree.root_node().expect("always exists").data().clone())
-        } else if self.return_stack.len() > 0 {
+        } else if !self.return_stack.is_empty() {
             self.return_stack.pop()
         } else {
             for n_append in self
@@ -56,7 +56,7 @@ impl NodeDataIterator {
         let tree = Tree::new(
             3,
             vec![(2, root)],
-            vec![(0, leaf(1).into()), (1, leaf(2).into())],
+            vec![(0, Entry::new_leaf(leaf(1))), (1, Entry::new_leaf(leaf(2)))],
         );
 
         NodeDataIterator {

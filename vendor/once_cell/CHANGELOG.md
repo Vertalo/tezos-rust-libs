@@ -4,6 +4,21 @@
 
 -
 
+## 1.17.0
+
+- Add `race::OnceRef` for storing a `&'a T`.
+
+## 1.16.0
+
+- Add `no_std` implementation based on `critical-section`,
+  [#195](https://github.com/matklad/once_cell/pull/195).
+- Deprecate `atomic-polyfill` feature (use the new `critical-section` instead)
+
+## 1.15.0
+
+- Increase minimal supported Rust version to 1.56.0.
+- Implement `UnwindSafe` even if the `std` feature is disabled.
+
 ## 1.14.0
 
 - Add extension to `unsync` and `sync` `Lazy` mut API:

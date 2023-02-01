@@ -13,8 +13,7 @@
 use bellman::gadgets::boolean::{AllocatedBit, Boolean};
 use bellman::gadgets::multipack::pack_into_inputs;
 use bellman::{Circuit, ConstraintSystem, LinearCombination, SynthesisError};
-use ff::Field;
-use pairing::Engine;
+use ff::PrimeField;
 
 mod commitment;
 mod input;
@@ -36,12 +35,12 @@ pub struct JoinSplit {
     pub vpub_new: Option<u64>,
     pub h_sig: Option<[u8; 32]>,
     pub phi: Option<[u8; 32]>,
-    pub inputs: Vec<JSInput>,
-    pub outputs: Vec<JSOutput>,
+    pub inputs: Vec<JsInput>,
+    pub outputs: Vec<JsOutput>,
     pub rt: Option<[u8; 32]>,
 }
 
-pub struct JSInput {
+pub struct JsInput {
     pub value: Option<u64>,
     pub a_sk: Option<SpendingKey>,
     pub rho: Option<UniqueRandomness>,
@@ -49,14 +48,14 @@ pub struct JSInput {
     pub auth_path: [Option<([u8; 32], bool)>; TREE_DEPTH],
 }
 
-pub struct JSOutput {
+pub struct JsOutput {
     pub value: Option<u64>,
     pub a_pk: Option<PayingKey>,
     pub r: Option<CommitmentRandomness>,
 }
 
-impl<E: Engine> Circuit<E> for JoinSplit {
-    fn synthesize<CS: ConstraintSystem<E>>(self, cs: &mut CS) -> Result<(), SynthesisError> {
+impl<Scalar: PrimeField> Circuit<Scalar> for JoinSplit {
+    fn synthesize<CS: ConstraintSystem<Scalar>>(self, cs: &mut CS) -> Result<(), SynthesisError> {
         assert_eq!(self.inputs.len(), 2);
         assert_eq!(self.outputs.len(), 2);
 
@@ -79,7 +78,7 @@ impl<E: Engine> Circuit<E> for JoinSplit {
         let mut rhs = vpub_new.lc();
 
         // Witness rt (merkle tree root)
-        let rt = witness_u256(cs.namespace(|| "rt"), self.rt.as_ref().map(|v| &v[..])).unwrap();
+        let rt = witness_u256(cs.namespace(|| "rt"), self.rt.as_ref().map(|v| &v[..]))?;
 
         // Witness h_sig
         let h_sig = witness_u256(
@@ -89,7 +88,7 @@ impl<E: Engine> Circuit<E> for JoinSplit {
         .unwrap();
 
         // Witness phi
-        let phi = witness_u252(cs.namespace(|| "phi"), self.phi.as_ref().map(|v| &v[..])).unwrap();
+        let phi = witness_u252(cs.namespace(|| "phi"), self.phi.as_ref().map(|v| &v[..]))?;
 
         let mut input_notes = vec![];
         let mut lhs_total = self.vpub_old;
@@ -219,10 +218,10 @@ pub struct NoteValue {
 }
 
 impl NoteValue {
-    fn new<E, CS>(mut cs: CS, value: Option<u64>) -> Result<NoteValue, SynthesisError>
+    fn new<Scalar, CS>(mut cs: CS, value: Option<u64>) -> Result<NoteValue, SynthesisError>
     where
-        E: Engine,
-        CS: ConstraintSystem<E>,
+        Scalar: PrimeField,
+        CS: ConstraintSystem<Scalar>,
     {
         let mut values;
         match value {
@@ -262,13 +261,13 @@ impl NoteValue {
 
     /// Computes this value as a linear combination of
     /// its bits.
-    fn lc<E: Engine>(&self) -> LinearCombination<E> {
+    fn lc<Scalar: PrimeField>(&self) -> LinearCombination<Scalar> {
         let mut tmp = LinearCombination::zero();
 
-        let mut coeff = E::Fr::one();
+        let mut coeff = Scalar::one();
         for b in &self.bits {
             tmp = tmp + (coeff, b.get_variable());
-            coeff.double();
+            coeff = coeff.double();
         }
 
         tmp
@@ -281,15 +280,15 @@ impl NoteValue {
 
 /// Witnesses some bytes in the constraint system,
 /// skipping the first `skip_bits`.
-fn witness_bits<E, CS>(
+fn witness_bits<Scalar, CS>(
     mut cs: CS,
     value: Option<&[u8]>,
     num_bits: usize,
     skip_bits: usize,
 ) -> Result<Vec<Boolean>, SynthesisError>
 where
-    E: Engine,
-    CS: ConstraintSystem<E>,
+    Scalar: PrimeField,
+    CS: ConstraintSystem<Scalar>,
 {
     let bit_values = if let Some(value) = value {
         let mut tmp = vec![];
@@ -318,18 +317,18 @@ where
     Ok(bits)
 }
 
-fn witness_u256<E, CS>(cs: CS, value: Option<&[u8]>) -> Result<Vec<Boolean>, SynthesisError>
+fn witness_u256<Scalar, CS>(cs: CS, value: Option<&[u8]>) -> Result<Vec<Boolean>, SynthesisError>
 where
-    E: Engine,
-    CS: ConstraintSystem<E>,
+    Scalar: PrimeField,
+    CS: ConstraintSystem<Scalar>,
 {
     witness_bits(cs, value, 256, 0)
 }
 
-fn witness_u252<E, CS>(cs: CS, value: Option<&[u8]>) -> Result<Vec<Boolean>, SynthesisError>
+fn witness_u252<Scalar, CS>(cs: CS, value: Option<&[u8]>) -> Result<Vec<Boolean>, SynthesisError>
 where
-    E: Engine,
-    CS: ConstraintSystem<E>,
+    Scalar: PrimeField,
+    CS: ConstraintSystem<Scalar>,
 {
     witness_bits(cs, value, 252, 4)
 }
@@ -338,7 +337,7 @@ where
 #[ignore]
 fn test_sprout_constraints() {
     use bellman::gadgets::test::*;
-    use pairing::bls12_381::Bls12;
+    use bls12_381::Scalar;
 
     use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
@@ -348,15 +347,15 @@ fn test_sprout_constraints() {
     fn get_u256<R: ReadBytesExt>(mut reader: R) -> [u8; 32] {
         let mut result = [0u8; 32];
 
-        for i in 0..32 {
-            result[i] = reader.read_u8().unwrap();
+        for b in &mut result {
+            *b = reader.read_u8().unwrap();
         }
 
         result
     }
 
-    while test_vector.len() != 0 {
-        let mut cs = TestConstraintSystem::<Bls12>::new();
+    while !test_vector.is_empty() {
+        let mut cs = TestConstraintSystem::<Scalar>::new();
 
         let phi = Some(get_u256(&mut test_vector));
         let rt = Some(get_u256(&mut test_vector));
@@ -375,8 +374,10 @@ fn test_sprout_constraints() {
                 auth_path[i] = Some((sibling, false));
             }
             let mut position = test_vector.read_u64::<LittleEndian>().unwrap();
-            for i in 0..TREE_DEPTH {
-                auth_path[i].as_mut().map(|p| p.1 = (position & 1) == 1);
+            for sibling in &mut auth_path {
+                if let Some(p) = sibling {
+                    p.1 = (position & 1) == 1;
+                }
 
                 position >>= 1;
             }
@@ -388,7 +389,7 @@ fn test_sprout_constraints() {
             let r = Some(CommitmentRandomness(get_u256(&mut test_vector)));
             let a_sk = Some(SpendingKey(get_u256(&mut test_vector)));
 
-            inputs.push(JSInput {
+            inputs.push(JsInput {
                 value,
                 a_sk,
                 rho,
@@ -405,7 +406,7 @@ fn test_sprout_constraints() {
             get_u256(&mut test_vector);
             let r = Some(CommitmentRandomness(get_u256(&mut test_vector)));
 
-            outputs.push(JSOutput { value, a_pk, r });
+            outputs.push(JsOutput { value, a_pk, r });
         }
 
         let vpub_old = Some(test_vector.read_u64::<LittleEndian>().unwrap());
@@ -462,7 +463,7 @@ fn test_sprout_constraints() {
         use bellman::gadgets::multipack;
 
         let expected_inputs = multipack::bytes_to_bits(&expected_inputs);
-        let expected_inputs = multipack::compute_multipacking::<Bls12>(&expected_inputs);
+        let expected_inputs = multipack::compute_multipacking(&expected_inputs);
 
         assert!(cs.verify(&expected_inputs));
     }

@@ -3,7 +3,7 @@
 //!
 //! [`sha256`]: crate::gadgets::sha256
 
-use ff::{Field, PrimeField, ScalarEngine};
+use ff::PrimeField;
 
 use crate::{ConstraintSystem, LinearCombination, SynthesisError};
 
@@ -43,10 +43,10 @@ impl UInt32 {
     }
 
     /// Allocate a `UInt32` in the constraint system
-    pub fn alloc<E, CS>(mut cs: CS, value: Option<u32>) -> Result<Self, SynthesisError>
+    pub fn alloc<Scalar, CS>(mut cs: CS, value: Option<u32>) -> Result<Self, SynthesisError>
     where
-        E: ScalarEngine,
-        CS: ConstraintSystem<E>,
+        Scalar: PrimeField,
+        CS: ConstraintSystem<Scalar>,
     {
         let values = match value {
             Some(mut val) => {
@@ -87,11 +87,15 @@ impl UInt32 {
 
         let mut value = Some(0u32);
         for b in bits {
-            value.as_mut().map(|v| *v <<= 1);
+            if let Some(v) = value.as_mut() {
+                *v <<= 1;
+            }
 
             match b.get_value() {
                 Some(true) => {
-                    value.as_mut().map(|v| *v |= 1);
+                    if let Some(v) = value.as_mut() {
+                        *v |= 1;
+                    }
                 }
                 Some(false) => {}
                 None => {
@@ -120,24 +124,32 @@ impl UInt32 {
 
         let mut value = Some(0u32);
         for b in new_bits.iter().rev() {
-            value.as_mut().map(|v| *v <<= 1);
+            if let Some(v) = value.as_mut() {
+                *v <<= 1
+            };
 
             match *b {
                 Boolean::Constant(b) => {
                     if b {
-                        value.as_mut().map(|v| *v |= 1);
+                        if let Some(v) = value.as_mut() {
+                            *v |= 1;
+                        }
                     }
                 }
                 Boolean::Is(ref b) => match b.get_value() {
                     Some(true) => {
-                        value.as_mut().map(|v| *v |= 1);
+                        if let Some(v) = value.as_mut() {
+                            *v |= 1;
+                        }
                     }
                     Some(false) => {}
                     None => value = None,
                 },
                 Boolean::Not(ref b) => match b.get_value() {
                     Some(false) => {
-                        value.as_mut().map(|v| *v |= 1);
+                        if let Some(v) = value.as_mut() {
+                            *v |= 1;
+                        }
                     }
                     Some(true) => {}
                     None => value = None,
@@ -189,7 +201,7 @@ impl UInt32 {
         }
     }
 
-    fn triop<E, CS, F, U>(
+    fn triop<Scalar, CS, F, U>(
         mut cs: CS,
         a: &Self,
         b: &Self,
@@ -198,8 +210,8 @@ impl UInt32 {
         circuit_fn: U,
     ) -> Result<Self, SynthesisError>
     where
-        E: ScalarEngine,
-        CS: ConstraintSystem<E>,
+        Scalar: PrimeField,
+        CS: ConstraintSystem<Scalar>,
         F: Fn(u32, u32, u32) -> u32,
         U: Fn(&mut CS, usize, &Boolean, &Boolean, &Boolean) -> Result<Boolean, SynthesisError>,
     {
@@ -225,10 +237,15 @@ impl UInt32 {
 
     /// Compute the `maj` value (a and b) xor (a and c) xor (b and c)
     /// during SHA256.
-    pub fn sha256_maj<E, CS>(cs: CS, a: &Self, b: &Self, c: &Self) -> Result<Self, SynthesisError>
+    pub fn sha256_maj<Scalar, CS>(
+        cs: CS,
+        a: &Self,
+        b: &Self,
+        c: &Self,
+    ) -> Result<Self, SynthesisError>
     where
-        E: ScalarEngine,
-        CS: ConstraintSystem<E>,
+        Scalar: PrimeField,
+        CS: ConstraintSystem<Scalar>,
     {
         Self::triop(
             cs,
@@ -242,10 +259,15 @@ impl UInt32 {
 
     /// Compute the `ch` value `(a and b) xor ((not a) and c)`
     /// during SHA256.
-    pub fn sha256_ch<E, CS>(cs: CS, a: &Self, b: &Self, c: &Self) -> Result<Self, SynthesisError>
+    pub fn sha256_ch<Scalar, CS>(
+        cs: CS,
+        a: &Self,
+        b: &Self,
+        c: &Self,
+    ) -> Result<Self, SynthesisError>
     where
-        E: ScalarEngine,
-        CS: ConstraintSystem<E>,
+        Scalar: PrimeField,
+        CS: ConstraintSystem<Scalar>,
     {
         Self::triop(
             cs,
@@ -258,10 +280,10 @@ impl UInt32 {
     }
 
     /// XOR this `UInt32` with another `UInt32`
-    pub fn xor<E, CS>(&self, mut cs: CS, other: &Self) -> Result<Self, SynthesisError>
+    pub fn xor<Scalar, CS>(&self, mut cs: CS, other: &Self) -> Result<Self, SynthesisError>
     where
-        E: ScalarEngine,
-        CS: ConstraintSystem<E>,
+        Scalar: PrimeField,
+        CS: ConstraintSystem<Scalar>,
     {
         let new_value = match (self.value, other.value) {
             (Some(a), Some(b)) => Some(a ^ b),
@@ -283,15 +305,15 @@ impl UInt32 {
     }
 
     /// Perform modular addition of several `UInt32` objects.
-    pub fn addmany<E, CS, M>(mut cs: M, operands: &[Self]) -> Result<Self, SynthesisError>
+    pub fn addmany<Scalar, CS, M>(mut cs: M, operands: &[Self]) -> Result<Self, SynthesisError>
     where
-        E: ScalarEngine,
-        CS: ConstraintSystem<E>,
-        M: ConstraintSystem<E, Root = MultiEq<E, CS>>,
+        Scalar: PrimeField,
+        CS: ConstraintSystem<Scalar>,
+        M: ConstraintSystem<Scalar, Root = MultiEq<Scalar, CS>>,
     {
         // Make some arbitrary bounds for ourselves to avoid overflows
         // in the scalar field
-        assert!(E::Fr::NUM_BITS >= 64);
+        assert!(Scalar::NUM_BITS >= 64);
         assert!(operands.len() >= 2); // Weird trivial cases that should never happen
         assert!(operands.len() <= 10);
 
@@ -313,7 +335,9 @@ impl UInt32 {
             // Accumulate the value
             match op.value {
                 Some(val) => {
-                    result_value.as_mut().map(|v| *v += u64::from(val));
+                    if let Some(v) = result_value.as_mut() {
+                        *v += u64::from(val);
+                    }
                 }
                 None => {
                     // If any of our operands have unknown value, we won't
@@ -324,24 +348,24 @@ impl UInt32 {
 
             // Iterate over each bit of the operand and add the operand to
             // the linear combination
-            let mut coeff = E::Fr::one();
+            let mut coeff = Scalar::one();
             for bit in &op.bits {
                 lc = lc + &bit.lc(CS::one(), coeff);
 
                 all_constants &= bit.is_constant();
 
-                coeff.double();
+                coeff = coeff.double();
             }
         }
 
         // The value of the actual result is modulo 2^32
         let modular_value = result_value.map(|v| v as u32);
 
-        if all_constants && modular_value.is_some() {
+        if let (true, Some(result)) = (all_constants, modular_value) {
             // We can just return a constant, rather than
             // unpacking the result into allocated bits.
 
-            return Ok(UInt32::constant(modular_value.unwrap()));
+            return Ok(UInt32::constant(result));
         }
 
         // Storage area for the resulting bits
@@ -352,7 +376,7 @@ impl UInt32 {
         let mut result_lc = LinearCombination::zero();
 
         // Allocate each bit of the result
-        let mut coeff = E::Fr::one();
+        let mut coeff = Scalar::one();
         let mut i = 0;
         while max_value != 0 {
             // Allocate the bit
@@ -368,7 +392,7 @@ impl UInt32 {
 
             max_value >>= 1;
             i += 1;
-            coeff.double();
+            coeff = coeff.double();
         }
 
         // Enforce equality between the sum and result
@@ -391,8 +415,8 @@ mod test {
     use crate::gadgets::multieq::MultiEq;
     use crate::gadgets::test::*;
     use crate::ConstraintSystem;
+    use bls12_381::Scalar;
     use ff::Field;
-    use pairing::bls12_381::Bls12;
     use rand_core::{RngCore, SeedableRng};
     use rand_xorshift::XorShiftRng;
 
@@ -474,7 +498,7 @@ mod test {
         ]);
 
         for _ in 0..1000 {
-            let mut cs = TestConstraintSystem::<Bls12>::new();
+            let mut cs = TestConstraintSystem::<Scalar>::new();
 
             let a = rng.next_u32();
             let b = rng.next_u32();
@@ -499,7 +523,7 @@ mod test {
                         assert!(b.get_value().unwrap() == (expected & 1 == 1));
                     }
                     Boolean::Not(ref b) => {
-                        assert!(!b.get_value().unwrap() == (expected & 1 == 1));
+                        assert!(b.get_value().unwrap() != (expected & 1 == 1));
                     }
                     Boolean::Constant(b) => {
                         assert!(b == (expected & 1 == 1));
@@ -519,7 +543,7 @@ mod test {
         ]);
 
         for _ in 0..1000 {
-            let mut cs = TestConstraintSystem::<Bls12>::new();
+            let mut cs = TestConstraintSystem::<Scalar>::new();
 
             let a = rng.next_u32();
             let b = rng.next_u32();
@@ -555,6 +579,7 @@ mod test {
     }
 
     #[test]
+    #[allow(clippy::many_single_char_names)]
     fn test_uint32_addmany() {
         let mut rng = XorShiftRng::from_seed([
             0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06,
@@ -562,7 +587,7 @@ mod test {
         ]);
 
         for _ in 0..1000 {
-            let mut cs = TestConstraintSystem::<Bls12>::new();
+            let mut cs = TestConstraintSystem::<Scalar>::new();
 
             let a = rng.next_u32();
             let b = rng.next_u32();
@@ -592,7 +617,7 @@ mod test {
                         assert!(b.get_value().unwrap() == (expected & 1 == 1));
                     }
                     Boolean::Not(ref b) => {
-                        assert!(!b.get_value().unwrap() == (expected & 1 == 1));
+                        assert!(b.get_value().unwrap() != (expected & 1 == 1));
                     }
                     Boolean::Constant(_) => unreachable!(),
                 }
@@ -601,7 +626,7 @@ mod test {
             }
 
             // Flip a bit and see if the addition constraint still works
-            if cs.get("addition/result bit 0/boolean").is_zero() {
+            if cs.get("addition/result bit 0/boolean").is_zero_vartime() {
                 cs.set("addition/result bit 0/boolean", Field::one());
             } else {
                 cs.set("addition/result bit 0/boolean", Field::zero());
@@ -675,7 +700,7 @@ mod test {
         ]);
 
         for _ in 0..1000 {
-            let mut cs = TestConstraintSystem::<Bls12>::new();
+            let mut cs = TestConstraintSystem::<Scalar>::new();
 
             let a = rng.next_u32();
             let b = rng.next_u32();
@@ -695,14 +720,14 @@ mod test {
 
             for b in r.bits.iter() {
                 match b {
-                    &Boolean::Is(ref b) => {
+                    Boolean::Is(ref b) => {
                         assert!(b.get_value().unwrap() == (expected & 1 == 1));
                     }
-                    &Boolean::Not(ref b) => {
-                        assert!(!b.get_value().unwrap() == (expected & 1 == 1));
+                    Boolean::Not(ref b) => {
+                        assert!(b.get_value().unwrap() != (expected & 1 == 1));
                     }
-                    &Boolean::Constant(b) => {
-                        assert!(b == (expected & 1 == 1));
+                    Boolean::Constant(b) => {
+                        assert!(*b == (expected & 1 == 1));
                     }
                 }
 
@@ -719,7 +744,7 @@ mod test {
         ]);
 
         for _ in 0..1000 {
-            let mut cs = TestConstraintSystem::<Bls12>::new();
+            let mut cs = TestConstraintSystem::<Scalar>::new();
 
             let a = rng.next_u32();
             let b = rng.next_u32();
@@ -739,14 +764,14 @@ mod test {
 
             for b in r.bits.iter() {
                 match b {
-                    &Boolean::Is(ref b) => {
+                    Boolean::Is(ref b) => {
                         assert!(b.get_value().unwrap() == (expected & 1 == 1));
                     }
-                    &Boolean::Not(ref b) => {
-                        assert!(!b.get_value().unwrap() == (expected & 1 == 1));
+                    Boolean::Not(ref b) => {
+                        assert!(b.get_value().unwrap() != (expected & 1 == 1));
                     }
-                    &Boolean::Constant(b) => {
-                        assert!(b == (expected & 1 == 1));
+                    Boolean::Constant(b) => {
+                        assert!(*b == (expected & 1 == 1));
                     }
                 }
 

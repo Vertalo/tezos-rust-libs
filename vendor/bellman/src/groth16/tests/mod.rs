@@ -1,31 +1,31 @@
 use ff::{Field, PrimeField};
-use pairing::Engine;
 
 mod dummy_engine;
 use self::dummy_engine::*;
 
 use std::marker::PhantomData;
+use std::ops::{AddAssign, MulAssign, SubAssign};
 
 use crate::{Circuit, ConstraintSystem, SynthesisError};
 
 use super::{create_proof, generate_parameters, prepare_verifying_key, verify_proof};
 
-struct XORDemo<E: Engine> {
+struct XorDemo<Scalar: PrimeField> {
     a: Option<bool>,
     b: Option<bool>,
-    _marker: PhantomData<E>,
+    _marker: PhantomData<Scalar>,
 }
 
-impl<E: Engine> Circuit<E> for XORDemo<E> {
-    fn synthesize<CS: ConstraintSystem<E>>(self, cs: &mut CS) -> Result<(), SynthesisError> {
+impl<Scalar: PrimeField> Circuit<Scalar> for XorDemo<Scalar> {
+    fn synthesize<CS: ConstraintSystem<Scalar>>(self, cs: &mut CS) -> Result<(), SynthesisError> {
         let a_var = cs.alloc(
             || "a",
             || {
                 if self.a.is_some() {
                     if self.a.unwrap() {
-                        Ok(E::Fr::one())
+                        Ok(Scalar::one())
                     } else {
-                        Ok(E::Fr::zero())
+                        Ok(Scalar::zero())
                     }
                 } else {
                     Err(SynthesisError::AssignmentMissing)
@@ -45,9 +45,9 @@ impl<E: Engine> Circuit<E> for XORDemo<E> {
             || {
                 if self.b.is_some() {
                     if self.b.unwrap() {
-                        Ok(E::Fr::one())
+                        Ok(Scalar::one())
                     } else {
-                        Ok(E::Fr::zero())
+                        Ok(Scalar::zero())
                     }
                 } else {
                     Err(SynthesisError::AssignmentMissing)
@@ -67,9 +67,9 @@ impl<E: Engine> Circuit<E> for XORDemo<E> {
             || {
                 if self.a.is_some() && self.b.is_some() {
                     if self.a.unwrap() ^ self.b.unwrap() {
-                        Ok(E::Fr::one())
+                        Ok(Scalar::one())
                     } else {
-                        Ok(E::Fr::zero())
+                        Ok(Scalar::zero())
                     }
                 } else {
                     Err(SynthesisError::AssignmentMissing)
@@ -92,20 +92,20 @@ impl<E: Engine> Circuit<E> for XORDemo<E> {
 fn test_xordemo() {
     let g1 = Fr::one();
     let g2 = Fr::one();
-    let alpha = Fr::from_str("48577").unwrap();
-    let beta = Fr::from_str("22580").unwrap();
-    let gamma = Fr::from_str("53332").unwrap();
-    let delta = Fr::from_str("5481").unwrap();
-    let tau = Fr::from_str("3673").unwrap();
+    let alpha = Fr::from(48577);
+    let beta = Fr::from(22580);
+    let gamma = Fr::from(53332);
+    let delta = Fr::from(5481);
+    let tau = Fr::from(3673);
 
     let params = {
-        let c = XORDemo::<DummyEngine> {
+        let c = XorDemo {
             a: None,
             b: None,
             _marker: PhantomData,
         };
 
-        generate_parameters(c, g1, g2, alpha, beta, gamma, delta, tau).unwrap()
+        generate_parameters::<DummyEngine, _>(c, g1, g2, alpha, beta, gamma, delta, tau).unwrap()
     };
 
     // This will synthesize the constraint system:
@@ -126,22 +126,22 @@ fn test_xordemo() {
     let mut root_of_unity = Fr::root_of_unity();
 
     // We expect this to be a 2^10 root of unity
-    assert_eq!(Fr::one(), root_of_unity.pow(&[1 << 10]));
+    assert_eq!(Fr::one(), root_of_unity.pow_vartime(&[1u64 << 10]));
 
     // Let's turn it into a 2^3 root of unity.
-    root_of_unity = root_of_unity.pow(&[1 << 7]);
-    assert_eq!(Fr::one(), root_of_unity.pow(&[1 << 3]));
-    assert_eq!(Fr::from_str("20201").unwrap(), root_of_unity);
+    root_of_unity = root_of_unity.pow_vartime(&[1u64 << 7]);
+    assert_eq!(Fr::one(), root_of_unity.pow_vartime(&[1u64 << 3]));
+    assert_eq!(Fr::from(20201), root_of_unity);
 
     // Let's compute all the points in our evaluation domain.
     let mut points = Vec::with_capacity(8);
-    for i in 0..8 {
-        points.push(root_of_unity.pow(&[i]));
+    for i in 0u64..8 {
+        points.push(root_of_unity.pow_vartime(&[i]));
     }
 
     // Let's compute t(tau) = (tau - p_0)(tau - p_1)...
     //                      = tau^8 - 1
-    let mut t_at_tau = tau.pow(&[8]);
+    let mut t_at_tau = tau.pow_vartime(&[8u64]);
     t_at_tau.sub_assign(&Fr::one());
     {
         let mut tmp = Fr::one();
@@ -155,8 +155,8 @@ fn test_xordemo() {
 
     // We expect our H query to be 7 elements of the form...
     // {tau^i t(tau) / delta}
-    let delta_inverse = delta.inverse().unwrap();
-    let gamma_inverse = gamma.inverse().unwrap();
+    let delta_inverse = delta.invert().unwrap();
+    let gamma_inverse = gamma.invert().unwrap();
     {
         let mut coeff = delta_inverse;
         coeff.mul_assign(&t_at_tau);
@@ -215,15 +215,15 @@ fn test_xordemo() {
 
     let u_i = [59158, 48317, 21767, 10402]
         .iter()
-        .map(|e| Fr::from_str(&format!("{}", e)).unwrap())
+        .map(|e| Fr::from(*e))
         .collect::<Vec<Fr>>();
     let v_i = [0, 0, 60619, 30791]
         .iter()
-        .map(|e| Fr::from_str(&format!("{}", e)).unwrap())
+        .map(|e| Fr::from(*e))
         .collect::<Vec<Fr>>();
     let w_i = [0, 23320, 41193, 41193]
         .iter()
-        .map(|e| Fr::from_str(&format!("{}", e)).unwrap())
+        .map(|e| Fr::from(*e))
         .collect::<Vec<Fr>>();
 
     for (u, a) in u_i.iter().zip(&params.a[..]) {
@@ -279,11 +279,11 @@ fn test_xordemo() {
 
     let pvk = prepare_verifying_key(&params.vk);
 
-    let r = Fr::from_str("27134").unwrap();
-    let s = Fr::from_str("17146").unwrap();
+    let r = Fr::from(27134);
+    let s = Fr::from(17146);
 
     let proof = {
-        let c = XORDemo {
+        let c = XorDemo {
             a: Some(true),
             b: Some(false),
             _marker: PhantomData,
@@ -367,7 +367,7 @@ fn test_xordemo() {
             .iter()
             .enumerate()
         {
-            let coeff = Fr::from_str(&format!("{}", coeff)).unwrap();
+            let coeff = Fr::from(*coeff);
 
             let mut tmp = params.h[i];
             tmp.mul_assign(&coeff);
@@ -377,5 +377,72 @@ fn test_xordemo() {
         assert_eq!(expected_c, proof.c);
     }
 
-    assert!(verify_proof(&pvk, &proof, &[Fr::one()]).unwrap());
+    assert!(verify_proof(&pvk, &proof, &[Fr::one()]).is_ok());
+}
+
+struct MultWithZeroCoeffs<F> {
+    a: Option<F>,
+    b: Option<F>,
+    c: Option<F>,
+    /// Whether to attach the zero coefficient to the "1" variable, or a different variable.
+    one_var: bool,
+}
+
+impl<F: ff::PrimeField> Circuit<F> for &MultWithZeroCoeffs<F> {
+    fn synthesize<CS: ConstraintSystem<F>>(self, cs: &mut CS) -> Result<(), SynthesisError> {
+        let a = cs.alloc(|| "a", || Ok(self.a.unwrap()))?;
+        let b = cs.alloc(|| "b", || Ok(self.b.unwrap()))?;
+        let c = cs.alloc(|| "c", || Ok(self.c.unwrap()))?;
+        if self.one_var {
+            cs.enforce(
+                || "cs",
+                // notice the zero coefficient on the B term
+                |z| z + a,
+                |z| z + (F::from(0), CS::one()) + b,
+                |z| z + c,
+            );
+        } else {
+            cs.enforce(
+                || "cs",
+                // notice the zero coefficient on the B term
+                |z| z + a,
+                |z| z + (F::from(0), a) + b,
+                |z| z + c,
+            );
+        }
+        Ok(())
+    }
+}
+
+fn zero_coeff_test(one_var: bool) {
+    let m = MultWithZeroCoeffs {
+        a: Some(Fr::from(5)),
+        b: Some(Fr::from(6)),
+        c: Some(Fr::from(30)),
+        one_var,
+    };
+    let g1 = Fr::one();
+    let g2 = Fr::one();
+    let alpha = Fr::from(48577);
+    let beta = Fr::from(22580);
+    let gamma = Fr::from(53332);
+    let delta = Fr::from(5481);
+    let tau = Fr::from(3673);
+    let pk =
+        generate_parameters::<DummyEngine, _>(&m, g1, g2, alpha, beta, gamma, delta, tau).unwrap();
+    let r = Fr::from(27134);
+    let s = Fr::from(17146);
+    let pf = create_proof(&m, &pk, r, s).unwrap();
+    let pvk = prepare_verifying_key(&pk.vk);
+    verify_proof(&pvk, &pf, &[]).unwrap();
+}
+
+#[test]
+fn zero_coeff_one_var() {
+    zero_coeff_test(true);
+}
+
+#[test]
+fn zero_coeff_non_one_var() {
+    zero_coeff_test(false);
 }

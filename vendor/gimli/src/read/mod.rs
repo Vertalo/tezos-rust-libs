@@ -214,6 +214,9 @@ mod index;
 pub use self::index::*;
 
 #[cfg(feature = "read")]
+mod lazy;
+
+#[cfg(feature = "read")]
 mod line;
 #[cfg(feature = "read")]
 pub use self::line::*;
@@ -622,6 +625,12 @@ pub trait Section<R>: From<R> {
     /// file.
     fn dwo_section_name() -> Option<&'static str> {
         Self::id().dwo_name()
+    }
+
+    /// Returns the XCOFF section name (if any) for this type when used in a XCOFF
+    /// file.
+    fn xcoff_section_name() -> Option<&'static str> {
+        Self::id().xcoff_name()
     }
 
     /// Try to load the section using the given loader function.
