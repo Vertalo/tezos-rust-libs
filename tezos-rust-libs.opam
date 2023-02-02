@@ -26,4 +26,21 @@ build:[
     "--features" "singlepass,cranelift,wat,middlewares,universal"
   ]
 ]
+install: [
+  [ "mkdir" "-p" "%{lib}%/tezos-rust-libs" ]
+  [ "mkdir" "-p" "%{lib}%/tezos-rust-libs/rust" ]
+  [ "cp"
+      "librustzcash/include/librustzcash.h"
+      "target-librustzcash/release/librustzcash.a"
+      "wasmer-2.3.0/lib/c-api/wasm.h"
+      "wasmer-2.3.0/lib/c-api/wasmer.h"
+      "target-wasmer/release/libwasmer.a"
+      "%{lib}%/tezos-rust-libs"
+  ]
+  [ "cp"
+      "librustzcash/include/rust/types.h"
+      "%{lib}%/tezos-rust-libs/rust"
+  ]
+
+]
 synopsis: "Tezos: all rust dependencies and their dependencies"
