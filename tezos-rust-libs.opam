@@ -4,7 +4,7 @@ authors: [ "Tezos devteam" ]
 homepage: "https://www.tezos.com/"
 bug-reports: "https://gitlab.com/tezos/tezos-rust-libs/issues"
 dev-repo: "git+https://gitlab.com/tezos/tezos-rust-libs.git"
-license: "multiple"
+license: "LicenseRef-multiple"
 depends: ["conf-rust-2021"]
 build:[
   [
