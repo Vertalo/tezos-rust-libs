@@ -5,9 +5,7 @@ homepage: "https://www.tezos.com/"
 bug-reports: "https://gitlab.com/tezos/tezos-rust-libs/issues"
 dev-repo: "git+https://gitlab.com/tezos/tezos-rust-libs.git"
 license: "multiple"
-depends: [
-  "conf-rust"
-]
+depends: ["conf-rust-2021"]
 build:[
   [
     "cargo"
