@@ -11,6 +11,10 @@
   #include <stdalign.h>
 #endif
 
+#if __APPLE__
+  #include <Security/SecRandom.h>
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
