@@ -31,7 +31,7 @@ use std::path::{Path, PathBuf};
 use std::slice;
 use std::sync::Once;
 use subtle::CtOption;
-use tracing::{error, info};
+use tracing::error;
 
 #[cfg(not(target_os = "windows"))]
 use std::ffi::OsStr;
@@ -174,9 +174,9 @@ pub extern "C" fn librustzcash_init_zksnark_params(
         let params = load_parameters(spend_path, output_path, sprout_path);
 
         // Generate Orchard parameters.
-        info!(target: "main", "Loading Orchard parameters");
-        let orchard_pk = orchard::circuit::ProvingKey::build();
-        let orchard_vk = orchard::circuit::VerifyingKey::build();
+        // info!(target: "main", "Loading Orchard parameters");
+        // let orchard_pk = orchard::circuit::ProvingKey::build();
+        // let orchard_vk = orchard::circuit::VerifyingKey::build();
 
         // Caller is responsible for calling this function once, so
         // these global mutations are safe.
@@ -189,8 +189,8 @@ pub extern "C" fn librustzcash_init_zksnark_params(
             SAPLING_OUTPUT_VK = Some(params.output_vk);
             SPROUT_GROTH16_VK = params.sprout_vk;
 
-            ORCHARD_PK = Some(orchard_pk);
-            ORCHARD_VK = Some(orchard_vk);
+            ORCHARD_PK = None;
+            ORCHARD_VK = None;
         }
     });
 }
