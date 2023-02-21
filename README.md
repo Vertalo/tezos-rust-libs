@@ -16,3 +16,6 @@ This repository contains all the rust libraries used in the codebase of tezos/te
 - wasmer-2.3.0:
   - Explicit requirement of inkwell 0.1.0-beta.4, related to [this
     issue](https://github.com/wasmerio/wasmer/issues/3565)
+  - Fix return type of `warm_memory_data` from `byte_t` to `unsigned char *` to
+    partially fix the issue
+    [#4908](https://gitlab.com/tezos/tezos/-/issues/4908). See commit 06d78aa4.
