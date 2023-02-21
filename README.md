@@ -12,6 +12,7 @@ This repository contains all the rust libraries used in the codebase of tezos/te
 
 - librustzcash:
   - change lib path of Cargo.toml to map this repository structure
+  - deactivate Orchard parameters loading
 - wasmer-2.3.0:
   - Explicit requirement of inkwell 0.1.0-beta.4, related to [this
     issue](https://github.com/wasmerio/wasmer/issues/3565)
