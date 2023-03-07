@@ -7,22 +7,21 @@ dev-repo: "git+https://gitlab.com/tezos/tezos-rust-libs.git"
 license: "LicenseRef-multiple"
 depends: ["conf-rust-2021"]
 build:[
+  [ "cd" "librustzcash" ]
   [
     "cargo"
     "build"
-    "--target-dir" "target-librustzcash"
     "--release"
-    "--package" "librustzcash"
   ]
+  [ "cd" "../wasmer-2.3.0/lib/c-api" ]
   [
     "cargo"
     "build"
-    "--target-dir" "target-wasmer"
     "--release"
-    "--package" "wasmer-c-api"
     "--no-default-features"
     "--features" "singlepass,cranelift,wat,middlewares,universal"
   ]
+  [ "cd" "../../.." ]
 ]
 install: [
   [ "mkdir" "-p" "%{lib}%/tezos-rust-libs" ]
